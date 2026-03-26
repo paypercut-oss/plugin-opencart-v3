@@ -1,0 +1,115 @@
+name: Release OpenCart Module ZIP
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Determine version + artifact name
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"          # e.g. v1.1.0
+          VERSION="${TAG#v}"                # 1.1.0
+          NAME="paypercut-opencartv2-${VERSION}.ocmod.zip"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "zip_name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Sync XML version to tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+
+          version = os.environ["VERSION"]
+          file_path = os.environ["XML_FILE"]
+
+          if not os.path.exists(file_path):
+              raise SystemExit(f"{file_path} does not exist")
+
+          tree = ET.parse(file_path)
+          root = tree.getroot()
+
+          version_el = root.find("version")
+          if version_el is None:
+              raise SystemExit(f"{file_path} does not contain <version>")
+
+          version_el.text = version
+
+          tree.write(file_path, encoding="UTF-8", xml_declaration=True)
+          PY
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          XML_FILE: install.xml
+
+      - name: Build ZIP (module contents at ZIP root)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="${{ steps.meta.outputs.zip_name }}"
+          PKG_ROOT="$(pwd)"
+          STAGE_DIR="$(mktemp -d)"
+
+          mkdir -p dist
+          rm -f "dist/${ZIP}"
+
+          # Basic sanity checks
+          test -f install.xml
+
+          # Copy module contents directly into staging folder
+          rsync -a ./ "${STAGE_DIR}/" \
+            --exclude ".git/" \
+            --exclude ".github/" \
+            --exclude "vendor/" \
+            --exclude "node_modules/" \
+            --exclude ".idea/" \
+            --exclude ".vscode/" \
+            --exclude "internal/" \
+            --exclude "dist/" \
+            --exclude ".gitignore" \
+            --exclude ".DS_Store"
+
+          # Build zip so the contents are at ZIP root
+          pushd "${STAGE_DIR}" >/dev/null
+          zip -r "${PKG_ROOT}/dist/${ZIP}" .
+          popd >/dev/null
+
+      - name: Verify ZIP contents (top-level folder exists)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="dist/${{ steps.meta.outputs.zip_name }}"
+
+          echo "ZIP listing (first 80 lines):"
+          zipinfo -1 "$ZIP" | head -80
+
+          # Ensure module lives under paypercut/
+          zipinfo -1 "$ZIP" | grep -x "upload/" >/dev/null
+          zipinfo -1 "$ZIP" | grep -x "install.xml" >/dev/null
+
+      - name: Create GitHub Release + upload ZIP
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            dist/${{ steps.meta.outputs.zip_name }}
