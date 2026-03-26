@@ -1,0 +1,460 @@
+{% if has_transaction %}
+<div class="container-fluid">
+<div class="panel panel-default">
+  <div class="panel-heading">
+    <h3 class="panel-title">
+      <i class="fa fa-credit-card"></i> Paypercut Payment Information
+    </h3>
+  </div>
+    <div class="panel-body">
+      
+      <!-- Transaction Details -->
+      <table class="table table-bordered">
+        <tbody>
+          <tr>
+            <td style="width: 30%;"><strong>Transaction ID</strong></td>
+            <td>
+              <code>{{ transaction.payment_id }}</code>
+              <a href="{{ paypercut_dashboard_url }}" target="_blank" class="btn btn-xs btn-info" style="margin-left: 10px;">
+                <i class="fa fa-external-link"></i> View in Dashboard
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Payment Status</strong></td>
+            <td>
+              {% if transaction.status == 'succeeded' %}
+                <span class="label label-success"><i class="fa fa-check-circle"></i> Succeeded</span>
+              {% elseif transaction.status == 'pending' %}
+                <span class="label label-warning"><i class="fa fa-clock-o"></i> Pending</span>
+              {% elseif transaction.status == 'failed' %}
+                <span class="label label-danger"><i class="fa fa-times-circle"></i> Failed</span>
+              {% else %}
+                <span class="label label-default">{{ transaction.status|capitalize }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Payment Method</strong></td>
+            <td>
+              <i class="fa fa-credit-card"></i> {{ payment_method_formatted }}
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Amount</strong></td>
+            <td><strong>{{ transaction.amount|number_format(2) }} {{ transaction.currency }}</strong></td>
+          </tr>
+          {% if transaction.paypercut_customer_id %}
+          <tr>
+            <td><strong>Paypercut Customer ID</strong></td>
+            <td><code>{{ transaction.paypercut_customer_id }}</code></td>
+          </tr>
+          {% endif %}
+          <tr>
+            <td><strong>Payment Date</strong></td>
+            <td>{{ transaction.created_at }}</td>
+          </tr>
+          <tr>
+            <td colspan="2">
+              <button type="button" id="btn-view-details" class="btn btn-sm btn-default">
+                <i class="fa fa-info-circle"></i> View Full Transaction Details
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      
+      <!-- Payment Actions for Uncaptured Payments -->
+      {% if transaction.status == 'requires_capture' %}
+      <hr>
+      <div class="alert alert-warning">
+        <i class="fa fa-exclamation-triangle"></i> <strong>Payment Authorization:</strong> This payment has been authorized but not yet captured. You must capture or cancel it.
+      </div>
+      
+      <div class="btn-group" role="group">
+        <button type="button" id="btn-capture-payment" class="btn btn-success">
+          <i class="fa fa-check"></i> Capture Payment
+        </button>
+        <button type="button" id="btn-cancel-payment" class="btn btn-danger">
+          <i class="fa fa-ban"></i> Cancel Payment
+        </button>
+      </div>
+      
+      <div id="payment-action-status" style="margin-top: 15px;"></div>
+      {% endif %}
+      
+      <!-- Refund Section -->
+      {% if transaction.status == 'succeeded' %}
+        <hr>
+        <h4><i class="fa fa-undo"></i> Refund Management</h4>
+        
+        {% if refunds %}
+        <div class="alert alert-info">
+          <strong>Refund History:</strong>
+          <ul style="margin: 10px 0 0 0; padding-left: 20px;">
+            {% for refund in refunds %}
+            <li>
+              <strong>{{ refund.amount|number_format(2) }} {{ refund.currency }}</strong>
+              - <code>{{ refund.refund_id }}</code>
+              - 
+              {% if refund.status == 'succeeded' %}
+                <span class="label label-success">Succeeded</span>
+              {% elseif refund.status == 'pending' %}
+                <span class="label label-warning">Pending</span>
+              {% elseif refund.status == 'failed' %}
+                <span class="label label-danger">Failed</span>
+              {% endif %}
+              <br>
+              <small>{{ refund.created_at }}{% if refund.reason %} - {{ refund.reason }}{% endif %}</small>
+            </li>
+            {% endfor %}
+          </ul>
+          <p style="margin-top: 10px;"><strong>Total Refunded:</strong> {{ total_refunded|number_format(2) }} {{ transaction.currency }}</p>
+        </div>
+        {% endif %}
+        
+        {% if can_refund %}
+        <div id="refund-form">
+          <div class="form-group">
+            <label class="control-label">Refund Type:</label>
+            <div>
+              <label class="radio-inline">
+                <input type="radio" name="refund_type" value="partial" id="refund-partial" checked> Partial Refund
+              </label>
+              <label class="radio-inline">
+                <input type="radio" name="refund_type" value="full" id="refund-full"> Full Refund
+              </label>
+            </div>
+          </div>
+          
+          <div class="form-group" id="refund-amount-group">
+            <label class="control-label" for="refund-amount">Refund Amount ({{ transaction.currency }}):</label>
+            <input type="number" class="form-control" id="refund-amount" step="0.01" min="0.01" max="{{ transaction.amount - total_refunded }}" placeholder="0.00" style="max-width: 200px;">
+            <span class="help-block">Maximum refundable: {{ (transaction.amount - total_refunded)|number_format(2) }} {{ transaction.currency }}</span>
+          </div>
+          
+          <div class="form-group">
+            <label class="control-label" for="refund-reason">Reason:</label>
+            <select class="form-control" id="refund-reason" style="max-width: 300px;">
+              <option value="requested_by_customer">Requested by Customer</option>
+              <option value="duplicate">Duplicate Payment</option>
+              <option value="fraudulent">Fraudulent Transaction</option>
+            </select>
+            <span class="help-block">Select the reason for this refund</span>
+          </div>
+          
+          <div id="refund-status"></div>
+          
+          <button type="button" id="btn-process-refund" class="btn btn-danger">
+            <i class="fa fa-undo"></i> Process Refund
+          </button>
+        </div>
+        {% else %}
+          {% if total_refunded >= transaction.amount %}
+          <div class="alert alert-warning">
+            <i class="fa fa-info-circle"></i> This payment has been fully refunded.
+          </div>
+          {% endif %}
+        {% endif %}
+      {% endif %}
+      
+    </div>
+  </div>
+</div>
+
+<!-- Transaction Details Modal -->
+<div class="modal fade" id="transaction-details-modal" tabindex="-1" role="dialog">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+        <h4 class="modal-title">
+          <i class="fa fa-info-circle"></i> Full Transaction Details
+        </h4>
+      </div>
+      <div class="modal-body" id="transaction-details-content">
+        <!-- Content loaded via AJAX -->
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="text/javascript">
+(function() {
+    // Wait for jQuery to be available
+    if (typeof jQuery === 'undefined') {
+        setTimeout(arguments.callee, 50);
+        return;
+    }
+    
+// Handle refund type toggle
+jQuery('input[name="refund_type"]').on('change', function() {
+    if (jQuery(this).val() === 'full') {
+        jQuery('#refund-amount-group').hide();
+    } else {
+        jQuery('#refund-amount-group').show();
+    }
+});
+
+// Process refund
+jQuery('#btn-process-refund').on('click', function() {
+    var refundType = jQuery('input[name="refund_type"]:checked').val();
+    var refundAmount = parseFloat(jQuery('#refund-amount').val());
+    var refundReason = jQuery('#refund-reason').val();
+    var isFull = refundType === 'full';
+    
+    // Validation
+    if (!isFull && (!refundAmount || refundAmount <= 0)) {
+        alert('Please enter a valid refund amount.');
+        return;
+    }
+    
+    if (!confirm('Are you sure you want to process this refund? This action cannot be undone.')) {
+        return;
+    }
+    
+    jQuery('#refund-status').html('<div class="alert alert-info"><i class="fa fa-spinner fa-spin"></i> Processing refund...</div>');
+    jQuery('#btn-process-refund').prop('disabled', true);
+    
+    jQuery.ajax({
+        url: 'index.php?route=extension/payment/paypercut_order/refund&user_token={{ user_token }}',
+        type: 'post',
+        data: {
+            order_id: {{ order_id }},
+            refund_amount: refundAmount,
+            refund_reason: refundReason,
+            full_refund: isFull
+        },
+        dataType: 'json',
+        success: function(json) {
+            if (json.error) {
+                jQuery('#refund-status').html(
+                    '<div class="alert alert-danger alert-dismissible">' +
+                    '<button type="button" class="close" data-dismiss="alert">&times;</button>' +
+                    '<i class="fa fa-exclamation-circle"></i> <strong>Error:</strong> ' + json.error +
+                    '</div>'
+                );
+                jQuery('#btn-process-refund').prop('disabled', false);
+            } else if (json.success) {
+                jQuery('#refund-status').html(
+                    '<div class="alert alert-success alert-dismissible">' +
+                    '<button type="button" class="close" data-dismiss="alert">&times;</button>' +
+                    '<i class="fa fa-check-circle"></i> <strong>Success:</strong> ' + json.success +
+                    '<br><small>Refund ID: ' + json.refund_id + ' | Amount: ' + json.amount + ' {{ transaction.currency }}</small>' +
+                    '</div>'
+                );
+                
+                // Reload page after 2 seconds to show updated refund history
+                setTimeout(function() {
+                    location.reload();
+                }, 2000);
+            }
+        },
+        error: function(xhr, status, error) {
+            jQuery('#refund-status').html(
+                '<div class="alert alert-danger alert-dismissible">' +
+                '<button type="button" class="close" data-dismiss="alert">&times;</button>' +
+                '<i class="fa fa-exclamation-triangle"></i> <strong>Connection Error:</strong> ' + error +
+                '</div>'
+            );
+            jQuery('#btn-process-refund').prop('disabled', false);
+        }
+    });
+});
+
+// View transaction details
+jQuery('#btn-view-details').on('click', function() {
+    jQuery('#transaction-details-modal').modal('show');
+    jQuery('#transaction-details-content').html('<div class="text-center"><i class="fa fa-spinner fa-spin fa-3x"></i><p>Loading...</p></div>');
+    
+    jQuery.ajax({
+        url: 'index.php?route=extension/payment/paypercut_order/getTransactionDetails&user_token={{ user_token }}&order_id={{ order_id }}',
+        type: 'get',
+        dataType: 'json',
+        success: function(json) {
+            if (json.error) {
+                jQuery('#transaction-details-content').html(
+                    '<div class="alert alert-danger">' +
+                    '<i class="fa fa-exclamation-circle"></i> ' + json.error +
+                    '</div>'
+                );
+            } else if (json.success) {
+                var html = '<table class="table table-bordered table-striped">';
+                
+                // Basic info
+                html += '<tr><th colspan="2" class="bg-info">Payment Information</th></tr>';
+                html += '<tr><td style="width: 30%;"><strong>Payment ID</strong></td><td><code>' + json.payment.id + '</code></td></tr>';
+                html += '<tr><td><strong>Status</strong></td><td>' + json.payment.status + '</td></tr>';
+                html += '<tr><td><strong>Amount</strong></td><td>' + json.amount.toFixed(2) + ' ' + json.currency.toUpperCase() + '</td></tr>';
+                
+                // Fees and net amount
+                if (json.fees !== undefined) {
+                    html += '<tr><td><strong>Fees</strong></td><td>' + json.fees.toFixed(2) + ' ' + json.currency.toUpperCase() + '</td></tr>';
+                    html += '<tr><td><strong>Net Amount</strong></td><td><strong>' + json.net_amount.toFixed(2) + ' ' + json.currency.toUpperCase() + '</strong></td></tr>';
+                }
+                
+                // Capture status
+                html += '<tr><td><strong>Captured</strong></td><td>' + (json.captured ? '<span class="label label-success">Yes</span>' : '<span class="label label-warning">No</span>') + '</td></tr>';
+                
+                if (json.capture_before) {
+                    var captureDate = new Date(json.capture_before * 1000);
+                    html += '<tr><td><strong>Capture Before</strong></td><td>' + captureDate.toLocaleString() + '</td></tr>';
+                }
+                
+                // 3DS authentication
+                if (json.three_d_secure) {
+                    html += '<tr><th colspan="2" class="bg-info">3D Secure Authentication</th></tr>';
+                    html += '<tr><td><strong>Authenticated</strong></td><td>' + (json.three_d_secure.authenticated ? '<span class="label label-success">Yes</span>' : '<span class="label label-warning">No</span>') + '</td></tr>';
+                    
+                    if (json.three_d_secure.version) {
+                        html += '<tr><td><strong>3DS Version</strong></td><td>' + json.three_d_secure.version + '</td></tr>';
+                    }
+                    
+                    if (json.three_d_secure.result) {
+                        html += '<tr><td><strong>Result</strong></td><td>' + json.three_d_secure.result + '</td></tr>';
+                    }
+                }
+                
+                // Payment method details
+                if (json.payment.payment_method) {
+                    html += '<tr><th colspan="2" class="bg-info">Payment Method Details</th></tr>';
+                    html += '<tr><td colspan="2"><pre>' + JSON.stringify(json.payment.payment_method, null, 2) + '</pre></td></tr>';
+                }
+                
+                html += '</table>';
+                
+                jQuery('#transaction-details-content').html(html);
+            }
+        },
+        error: function() {
+            jQuery('#transaction-details-content').html(
+                '<div class="alert alert-danger">' +
+                '<i class="fa fa-exclamation-triangle"></i> Connection error' +
+                '</div>'
+            );
+        }
+    });
+});
+
+// Capture payment
+jQuery('#btn-capture-payment').on('click', function() {
+    if (!confirm('Are you sure you want to capture this payment?')) {
+        return;
+    }
+    
+    jQuery('#payment-action-status').html('<div class="alert alert-info"><i class="fa fa-spinner fa-spin"></i> Capturing payment...</div>');
+    jQuery('#btn-capture-payment').prop('disabled', true);
+    jQuery('#btn-cancel-payment').prop('disabled', true);
+    
+    jQuery.ajax({
+        url: 'index.php?route=extension/payment/paypercut_order/capture&user_token={{ user_token }}',
+        type: 'post',
+        data: {
+            order_id: {{ order_id }},
+            capture_amount: 0 // Full amount
+        },
+        dataType: 'json',
+        success: function(json) {
+            if (json.error) {
+                jQuery('#payment-action-status').html(
+                    '<div class="alert alert-danger alert-dismissible">' +
+                    '<button type="button" class="close" data-dismiss="alert">&times;</button>' +
+                    '<i class="fa fa-exclamation-circle"></i> <strong>Error:</strong> ' + json.error +
+                    '</div>'
+                );
+                jQuery('#btn-capture-payment').prop('disabled', false);
+                jQuery('#btn-cancel-payment').prop('disabled', false);
+            } else if (json.success) {
+                jQuery('#payment-action-status').html(
+                    '<div class="alert alert-success alert-dismissible">' +
+                    '<button type="button" class="close" data-dismiss="alert">&times;</button>' +
+                    '<i class="fa fa-check-circle"></i> <strong>Success:</strong> ' + json.success +
+                    '</div>'
+                );
+                
+                setTimeout(function() {
+                    location.reload();
+                }, 2000);
+            }
+        },
+        error: function() {
+            jQuery('#payment-action-status').html(
+                '<div class="alert alert-danger">' +
+                '<i class="fa fa-exclamation-triangle"></i> Connection error' +
+                '</div>'
+            );
+            jQuery('#btn-capture-payment').prop('disabled', false);
+            jQuery('#btn-cancel-payment').prop('disabled', false);
+        }
+    });
+});
+
+// Cancel payment
+jQuery('#btn-cancel-payment').on('click', function() {
+    var reason = prompt('Please enter a reason for canceling this payment (optional):');
+    
+    if (reason === null) {
+        return; // User clicked cancel
+    }
+    
+    if (!confirm('Are you sure you want to cancel this payment? This action cannot be undone.')) {
+        return;
+    }
+    
+    jQuery('#payment-action-status').html('<div class="alert alert-info"><i class="fa fa-spinner fa-spin"></i> Canceling payment...</div>');
+    jQuery('#btn-capture-payment').prop('disabled', true);
+    jQuery('#btn-cancel-payment').prop('disabled', true);
+    
+    jQuery.ajax({
+        url: 'index.php?route=extension/payment/paypercut_order/cancel&user_token={{ user_token }}',
+        type: 'post',
+        data: {
+            order_id: {{ order_id }},
+            cancel_reason: reason
+        },
+        dataType: 'json',
+        success: function(json) {
+            if (json.error) {
+                jQuery('#payment-action-status').html(
+                    '<div class="alert alert-danger alert-dismissible">' +
+                    '<button type="button" class="close" data-dismiss="alert">&times;</button>' +
+                    '<i class="fa fa-exclamation-circle"></i> <strong>Error:</strong> ' + json.error +
+                    '</div>'
+                );
+                jQuery('#btn-capture-payment').prop('disabled', false);
+                jQuery('#btn-cancel-payment').prop('disabled', false);
+            } else if (json.success) {
+                jQuery('#payment-action-status').html(
+                    '<div class="alert alert-success alert-dismissible">' +
+                    '<button type="button" class="close" data-dismiss="alert">&times;</button>' +
+                    '<i class="fa fa-check-circle"></i> <strong>Success:</strong> ' + json.success +
+                    '</div>'
+                );
+                
+                setTimeout(function() {
+                    location.reload();
+                }, 2000);
+            }
+        },
+        error: function() {
+            jQuery('#payment-action-status').html(
+                '<div class="alert alert-danger">' +
+                '<i class="fa fa-exclamation-triangle"></i> Connection error' +
+                '</div>'
+            );
+            jQuery('#btn-capture-payment').prop('disabled', false);
+            jQuery('#btn-cancel-payment').prop('disabled', false);
+        }
+    });
+});
+
+})(); // End self-executing function
+</script>
+{% else %}
+<!-- No Paypercut transaction found for this order -->
+{% endif %}
