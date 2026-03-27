@@ -25,7 +25,7 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"          # e.g. v1.1.0
           VERSION="${TAG#v}"                # 1.1.0
-          NAME="paypercut-opencartv2-${VERSION}.ocmod.zip"
+          NAME="paypercut-opencartv3-${VERSION}.ocmod.zip"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "zip_name=$NAME" >> "$GITHUB_OUTPUT"
