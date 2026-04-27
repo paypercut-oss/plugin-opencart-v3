@@ -78,6 +78,7 @@ jobs:
           rsync -a ./ "${STAGE_DIR}/" \
             --exclude ".git/" \
             --exclude ".github/" \
+            --exclude "docs/" \
             --exclude "vendor/" \
             --exclude "node_modules/" \
             --exclude ".idea/" \
