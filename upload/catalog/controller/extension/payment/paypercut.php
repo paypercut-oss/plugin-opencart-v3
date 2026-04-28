@@ -833,27 +833,9 @@ class ControllerExtensionPaymentPaypercut extends Controller
         // Handle different event types
         if (isset($data['type'])) {
             switch ($data['type']) {
-                case 'payment.succeeded':
-                    $this->handlePaymentSucceeded($data);
-                    break;
-                case 'payment.failed':
-                    $this->handlePaymentFailed($data);
-                    break;
-                case 'payment.pending':
-                    $this->handlePaymentPending($data);
-                    break;
-                case 'refund.created':
-                case 'refund.succeeded':
-                    $this->handleRefundEvent($data);
-                    break;
-                case 'payment_intent.succeeded':
                 case 'payment_intent.authorized':
                 case 'payment_intent.captured':
                     $this->handlePaymentIntentSucceeded($data);
-                    break;
-                case 'payment_intent.payment_failed':
-                case 'payment_intent.canceled':
-                    $this->handlePaymentIntentEvent($data);
                     break;
                 case 'checkout_session.completed':
                     $this->handleCheckoutSessionCompleted($data);
@@ -878,133 +860,6 @@ class ControllerExtensionPaymentPaypercut extends Controller
         $expected_signature = hash_hmac('sha256', $payload, $webhook_secret);
 
         return hash_equals($expected_signature, $signature);
-    }
-
-    private function handlePaymentSucceeded($data)
-    {
-        if (!isset($data['data']['object'])) {
-            return;
-        }
-
-        $payment = $data['data']['object'];
-        $order_id = $payment['client_reference_id'] ?? null;
-
-        if (!$order_id) {
-            $this->log('Payment succeeded but no order ID found');
-            return;
-        }
-
-        // Idempotency: Check if already processed
-        if ($this->isWebhookProcessed($data['id'] ?? '', $order_id, 'payment.succeeded')) {
-            $this->log('Webhook already processed for order #' . $order_id);
-            return;
-        }
-
-        $this->load->model('checkout/order');
-        $order_info = $this->model_checkout_order->getOrder($order_id);
-
-        if ($order_info) {
-            $order_status_id = $this->getOrderStatusForPaymentStatus('succeeded');
-
-            $comment = 'Payment completed via Paypercut' . PHP_EOL;
-            $comment .= 'Transaction ID: ' . ($payment['id'] ?? 'N/A') . PHP_EOL;
-            $comment .= 'Amount: ' . ($payment['formatted_amount'] ?? $payment['amount']) . ' ' . ($payment['currency']['iso'] ?? '');
-
-            if (isset($payment['payment_method_details']['card'])) {
-                $card = $payment['payment_method_details']['card'];
-                $comment .= PHP_EOL . 'Card: ' . ($card['brand'] ?? '') . ' ****' . ($card['last4'] ?? '');
-            }
-
-            $this->model_checkout_order->addOrderHistory($order_id, $order_status_id, $comment, true);
-
-            $this->log('Payment succeeded for order #' . $order_id);
-        }
-    }
-
-    private function handlePaymentFailed($data)
-    {
-        if (!isset($data['data']['object'])) {
-            return;
-        }
-
-        $payment = $data['data']['object'];
-        $order_id = $payment['client_reference_id'] ?? null;
-
-        if (!$order_id) {
-            return;
-        }
-
-        // Idempotency: Check if already processed
-        if ($this->isWebhookProcessed($data['id'] ?? '', $order_id, 'payment.failed')) {
-            $this->log('Webhook already processed for order #' . $order_id);
-            return;
-        }
-
-        $this->load->model('checkout/order');
-        $order_info = $this->model_checkout_order->getOrder($order_id);
-
-        if ($order_info) {
-            $comment = 'Payment failed via Paypercut' . PHP_EOL;
-            $comment .= 'Transaction ID: ' . ($payment['id'] ?? 'N/A') . PHP_EOL;
-            $comment .= 'Reason: ' . ($payment['failure_message'] ?? 'Unknown');
-
-            // Set to failed order status
-            $order_status_id = $this->getOrderStatusForPaymentStatus('failed');
-            $this->model_checkout_order->addOrderHistory($order_id, $order_status_id, $comment, false);
-
-            $this->log('Payment failed for order #' . $order_id);
-        }
-    }
-
-    private function handlePaymentPending($data)
-    {
-        if (!isset($data['data']['object'])) {
-            return;
-        }
-
-        $payment = $data['data']['object'];
-        $order_id = $payment['client_reference_id'] ?? null;
-
-        if (!$order_id) {
-            return;
-        }
-
-        // Idempotency: Check if already processed
-        if ($this->isWebhookProcessed($data['id'] ?? '', $order_id, 'payment.pending')) {
-            $this->log('Webhook already processed for order #' . $order_id);
-            return;
-        }
-
-        $this->load->model('checkout/order');
-        $order_info = $this->model_checkout_order->getOrder($order_id);
-
-        if ($order_info) {
-            $comment = 'Payment is pending' . PHP_EOL;
-            $comment .= 'Transaction ID: ' . ($payment['id'] ?? 'N/A');
-
-            $order_status_id = $this->getOrderStatusForPaymentStatus('pending');
-            $this->model_checkout_order->addOrderHistory($order_id, $order_status_id, $comment, false);
-
-            $this->log('Payment pending for order #' . $order_id);
-        }
-    }
-
-    private function handleRefundEvent($data)
-    {
-        if (!isset($data['data']['object'])) {
-            return;
-        }
-
-        $refund = $data['data']['object'];
-
-        // Get payment ID and then order ID
-        $payment_id = $refund['payment'] ?? null;
-
-        if ($payment_id) {
-            // We would need to look up the order by payment ID
-            // For now, log the event
-            $this->log('Refund event: ' . $data['type'] . ' for payment ' . $payment_id);
-        }
     }
 
     private function handlePaymentIntentSucceeded($data)
@@ -1094,12 +949,6 @@ class ControllerExtensionPaymentPaypercut extends Controller
             $this->model_checkout_order->addOrderHistory($order_id, $order_status_id, $comment, true);
             $this->log('checkout_session.completed processed for order #' . $order_id);
         }
-    }
-
-    private function handlePaymentIntentEvent($data)
-    {
-        // Handle payment intent events
-        $this->log('Payment intent event: ' . $data['type']);
     }
 
     private function log($message)
