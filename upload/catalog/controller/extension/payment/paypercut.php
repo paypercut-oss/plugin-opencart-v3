@@ -833,13 +833,16 @@ class ControllerExtensionPaymentPaypercut extends Controller
         // Handle different event types
         if (isset($data['type'])) {
             switch ($data['type']) {
-                case 'payment_intent.authorized':
                 case 'payment_intent.captured':
                     $this->handlePaymentIntentSucceeded($data);
                     break;
                 case 'checkout_session.completed':
                     $this->handleCheckoutSessionCompleted($data);
                     break;
+                default:
+                    $this->log('Unhandled webhook event type: ' . $data['type']);
+                    http_response_code(501);
+                    return;
             }
         }
 
