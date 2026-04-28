@@ -847,9 +847,16 @@ class ControllerExtensionPaymentPaypercut extends Controller
                     $this->handleRefundEvent($data);
                     break;
                 case 'payment_intent.succeeded':
+                case 'payment_intent.authorized':
+                case 'payment_intent.captured':
+                    $this->handlePaymentIntentSucceeded($data);
+                    break;
                 case 'payment_intent.payment_failed':
                 case 'payment_intent.canceled':
                     $this->handlePaymentIntentEvent($data);
+                    break;
+                case 'checkout_session.completed':
+                    $this->handleCheckoutSessionCompleted($data);
                     break;
             }
         }
@@ -997,6 +1004,95 @@ class ControllerExtensionPaymentPaypercut extends Controller
             // We would need to look up the order by payment ID
             // For now, log the event
             $this->log('Refund event: ' . $data['type'] . ' for payment ' . $payment_id);
+        }
+    }
+
+    private function handlePaymentIntentSucceeded($data)
+    {
+        if (!isset($data['data']['object'])) {
+            return;
+        }
+
+        $intent = $data['data']['object'];
+        $checkout_id = $intent['checkout_id'] ?? null;
+
+        if (!$checkout_id) {
+            $this->log('Payment intent event missing checkout_id');
+            return;
+        }
+
+        // Look up order_id via the stored transaction
+        $query = $this->db->query("
+            SELECT order_id FROM `" . DB_PREFIX . "paypercut_transaction`
+            WHERE checkout_id = '" . $this->db->escape($checkout_id) . "'
+            LIMIT 1
+        ");
+
+        if ($query->num_rows === 0) {
+            $this->log('No transaction found for checkout_id: ' . $checkout_id);
+            return;
+        }
+
+        $order_id = $query->row['order_id'];
+
+        if ($this->isWebhookProcessed($data['id'] ?? '', $order_id, $data['type'])) {
+            $this->log('Webhook already processed for order #' . $order_id);
+            return;
+        }
+
+        $this->load->model('checkout/order');
+        $order_info = $this->model_checkout_order->getOrder($order_id);
+
+        if ($order_info) {
+            $order_status_id = $this->getOrderStatusForPaymentStatus('succeeded');
+            $comment = 'Payment ' . str_replace('payment_intent.', '', $data['type']) . ' via Paypercut' . PHP_EOL;
+            $comment .= 'Payment Intent ID: ' . ($intent['id'] ?? 'N/A') . PHP_EOL;
+            $comment .= 'Amount: ' . number_format((int)($intent['amount'] ?? 0) / 100, 2) . ' ' . ($intent['currency'] ?? '');
+
+            $this->model_checkout_order->addOrderHistory($order_id, $order_status_id, $comment, true);
+            $this->log($data['type'] . ' processed for order #' . $order_id);
+        }
+    }
+
+    private function handleCheckoutSessionCompleted($data)
+    {
+        if (!isset($data['data']['object'])) {
+            return;
+        }
+
+        $session = $data['data']['object'];
+        $order_id = $session['client_reference_id'] ?? null;
+
+        if (!$order_id) {
+            $this->log('checkout_session.completed missing client_reference_id');
+            return;
+        }
+
+        if ($this->isWebhookProcessed($data['id'] ?? '', $order_id, 'checkout_session.completed')) {
+            $this->log('Webhook already processed for order #' . $order_id);
+            return;
+        }
+
+        // Only process if payment_status is paid and status is complete
+        $payment_status = $session['payment_status'] ?? '';
+        $status = $session['status'] ?? '';
+
+        if ($status !== 'complete' || $payment_status !== 'paid') {
+            $this->log('checkout_session.completed skipped: status=' . $status . ' payment_status=' . $payment_status);
+            return;
+        }
+
+        $this->load->model('checkout/order');
+        $order_info = $this->model_checkout_order->getOrder($order_id);
+
+        if ($order_info) {
+            $order_status_id = $this->getOrderStatusForPaymentStatus('succeeded');
+            $comment = 'Payment completed via Paypercut (Webhook)' . PHP_EOL;
+            $comment .= 'Checkout ID: ' . ($session['id'] ?? 'N/A') . PHP_EOL;
+            $comment .= 'Amount: ' . number_format((int)($session['amount_total'] ?? 0) / 100, 2) . ' ' . ($session['currency'] ?? '');
+
+            $this->model_checkout_order->addOrderHistory($order_id, $order_status_id, $comment, true);
+            $this->log('checkout_session.completed processed for order #' . $order_id);
         }
     }
 
