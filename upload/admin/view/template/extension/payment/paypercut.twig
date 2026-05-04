@@ -161,6 +161,31 @@
                   <span class="help-block"><i class="fa fa-info-circle"></i> {{ help_apple_pay }}</span>
                 </div>
               </div>
+              <div class="form-group">
+                <label class="col-sm-2 control-label">{{ entry_applepay_domain_file }}</label>
+                <div class="col-sm-10">
+                  {% if applepay_domain_status.state == 'ok' %}
+                  <div class="well well-sm" style="background: #dff0d8; border-color: #d6e9c6;">
+                    <h4><span class="label label-success"><i class="fa fa-check"></i> {{ text_applepay_domain_ok }}</span></h4>
+                    <p style="margin-top: 10px;"><i class="fa fa-check-circle"></i> {{ applepay_domain_status.message }}</p>
+                    <p style="margin-top: 5px;"><small><a href="{{ applepay_domain_status.public_url }}" target="_blank"><code>{{ applepay_domain_status.public_url }}</code></a></small></p>
+                  </div>
+                  {% elseif applepay_domain_status.state == 'missing' %}
+                  <div class="well well-sm" style="background: #f2dede; border-color: #ebccd1;">
+                    <h4><span class="label label-danger"><i class="fa fa-times"></i> {{ text_applepay_domain_missing }}</span></h4>
+                    <p style="margin-top: 10px;"><i class="fa fa-exclamation-circle"></i> {{ applepay_domain_status.message }}</p>
+                    <p style="margin-top: 5px;"><small>{{ text_applepay_domain_manual_help }} <code>{{ applepay_domain_status.local_path }}</code></small></p>
+                  </div>
+                  {% else %}
+                  <div class="well well-sm" style="background: #fcf8e3; border-color: #faebcc;">
+                    <h4><span class="label label-warning"><i class="fa fa-exclamation-triangle"></i> {{ text_applepay_domain_warning }}</span></h4>
+                    <p style="margin-top: 10px;"><i class="fa fa-info-circle"></i> {{ applepay_domain_status.message }}</p>
+                    <p style="margin-top: 5px;"><small><strong>URL:</strong> <a href="{{ applepay_domain_status.public_url }}" target="_blank"><code>{{ applepay_domain_status.public_url }}</code></a></small></p>
+                  </div>
+                  {% endif %}
+                  <span class="help-block"><i class="fa fa-info-circle"></i> {{ help_applepay_domain_file }}</span>
+                </div>
+              </div>
 
               <div class="form-group">
                 <label class="col-sm-2 control-label" for="input-checkout-mode">
