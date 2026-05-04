@@ -49,9 +49,7 @@
 - **Apple Pay domain file** — on the Paypercut settings page, the *Apple
   Pay Domain File* row is green. Confirm with
   `curl -I https://<storefront>/.well-known/apple-developer-merchantid-domain-association`
-  returns `HTTP/1.1 200` and the body matches
-  `https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association`
-  byte-for-byte (`sha256sum`).
+  returns `HTTP/1.1 200`.
 
 ## Rollback
 

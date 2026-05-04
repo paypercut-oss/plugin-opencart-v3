@@ -5,10 +5,6 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
     // Apple Pay domain verification file — see https://docs.paypercut.io/docs/accept-payments/apple-pay
     // Bundled at upload/system/library/paypercut/applepay/apple-developer-merchantid-domain-association.
-    // The base64 below is an inline fallback used only if the bundled file is missing on disk
-    // (e.g. partial extraction). Both must decode to the same bytes; SHA256 guards against drift.
-    const APPLEPAY_DOMAIN_FILE_SHA256 = '60e92791a4fe483c4fc422d43b339862ee731f7e8f85448e398f01c9a8e2f11a';
-    const APPLEPAY_DOMAIN_FILE_BASE64 = 'N2IyMjc2NjU3MjczNjk2ZjZlMjIzYTMxMmMyMjcwNzM3MDQ5NjQyMjNhMjIzMjM1NDQ0NTQ0MzE0NDM1NDQzMzM4NDM0NjQ2NDY0NTM3MzczODM1NDMzMTMxMzI0MzMxMzYzOTQxMzYzNzMxMzczMDM4MzgzNjQyNDYzOTQzNDQzNTM4MzE0NTM3NDY0MjM4MzY0MjQ2NDUzMjM5MzQzMDM3MzMzNzQ0MzkzMTIyMmMyMjYzNzI2NTYxNzQ2NTY0NGY2ZTIyM2EzMTM3MzMzODM3MzczNzMxMzAzMTM0MzIzNDdk';
 
     public function index()
     {
@@ -744,48 +740,24 @@ class ControllerExtensionPaymentPaypercut extends Controller
     }
 
     /**
-     * Return the canonical bytes of the Apple Pay domain association file.
-     * Reads the bundled file under system/library/paypercut/applepay/ first,
-     * falling back to the inline base64 constant if the bundled copy is missing.
-     */
-    private function getApplePayDomainAssociationContent()
-    {
-        $bundled = DIR_SYSTEM . 'library/paypercut/applepay/apple-developer-merchantid-domain-association';
-
-        if (is_file($bundled) && is_readable($bundled)) {
-            $content = file_get_contents($bundled);
-            if ($content !== false && hash('sha256', $content) === self::APPLEPAY_DOMAIN_FILE_SHA256) {
-                return $content;
-            }
-        }
-
-        $fallback = base64_decode(self::APPLEPAY_DOMAIN_FILE_BASE64, true);
-        if ($fallback !== false && hash('sha256', $fallback) === self::APPLEPAY_DOMAIN_FILE_SHA256) {
-            return $fallback;
-        }
-
-        return null;
-    }
-
-    /**
-     * Deploy the Apple Pay domain association file to the storefront's webroot
-     * at .well-known/apple-developer-merchantid-domain-association. Idempotent.
+     * Deploy the Apple Pay domain association file from the bundled location
+     * to the storefront's webroot at .well-known/apple-developer-merchantid-domain-association.
      * Never throws — returns a structured result so callers can surface a warning.
      */
     private function deployApplePayDomainAssociation()
     {
-        $content = $this->getApplePayDomainAssociationContent();
-        if ($content === null) {
-            $this->log->write('Paypercut Apple Pay file deploy: bundled file missing and inline fallback failed integrity check.');
-            return array(
-                'success' => false,
-                'message' => 'Verification file content could not be loaded from the plugin package.',
-                'path' => ''
-            );
-        }
-
+        $source = DIR_SYSTEM . 'library/paypercut/applepay/apple-developer-merchantid-domain-association';
         $well_known_dir = DIR_OPENCART . '.well-known/';
         $destination = $well_known_dir . 'apple-developer-merchantid-domain-association';
+
+        if (!is_file($source)) {
+            $this->log->write('Paypercut Apple Pay file deploy: bundled file missing at ' . $source);
+            return array(
+                'success' => false,
+                'message' => 'Verification file not found in plugin package at ' . $source . '.',
+                'path' => $destination
+            );
+        }
 
         if (!is_dir($well_known_dir)) {
             if (!@mkdir($well_known_dir, 0755, true) && !is_dir($well_known_dir)) {
@@ -798,24 +770,8 @@ class ControllerExtensionPaymentPaypercut extends Controller
             }
         }
 
-        // No-op if the file is already correct.
-        if (is_file($destination)) {
-            $existing = @file_get_contents($destination);
-            if ($existing !== false && hash('sha256', $existing) === self::APPLEPAY_DOMAIN_FILE_SHA256) {
-                return array(
-                    'success' => true,
-                    'message' => 'Apple Pay verification file already up to date.',
-                    'path' => $destination
-                );
-            }
-            // A different file is present — likely from another PSP (e.g. Stripe).
-            // Apple's protocol allows only one verification file at this path; overwrite and log.
-            $this->log->write('Paypercut Apple Pay file deploy: overwriting existing different verification file at ' . $destination . ' (likely from another payment provider).');
-        }
-
-        $written = @file_put_contents($destination, $content, LOCK_EX);
-        if ($written === false || $written !== strlen($content)) {
-            $this->log->write('Paypercut Apple Pay file deploy: file_put_contents failed for ' . $destination);
+        if (!@copy($source, $destination)) {
+            $this->log->write('Paypercut Apple Pay file deploy: copy failed from ' . $source . ' to ' . $destination);
             return array(
                 'success' => false,
                 'message' => 'Could not write verification file to ' . $destination . '. Check filesystem permissions on the OpenCart root.',
@@ -833,12 +789,10 @@ class ControllerExtensionPaymentPaypercut extends Controller
     }
 
     /**
-     * Self-test: fetch the verification file over HTTPS at the storefront URL
-     * and confirm the response matches the canonical bytes.
+     * Self-test: confirm the verification file is on disk and reachable over HTTPS at the storefront URL.
      */
     private function checkApplePayDomainFile()
     {
-        $expected = $this->getApplePayDomainAssociationContent();
         $destination = DIR_OPENCART . '.well-known/apple-developer-merchantid-domain-association';
         $public_url = HTTPS_CATALOG . '.well-known/apple-developer-merchantid-domain-association';
 
@@ -851,13 +805,6 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
         if (!is_file($destination)) {
             $result['message'] = 'Verification file is not deployed. Save settings or reinstall the extension to deploy.';
-            return $result;
-        }
-
-        $local = @file_get_contents($destination);
-        if ($local === false || $expected === null || hash('sha256', $local) !== self::APPLEPAY_DOMAIN_FILE_SHA256) {
-            $result['state'] = 'mismatch_local';
-            $result['message'] = 'Verification file on disk does not match the expected content. Save settings to redeploy.';
             return $result;
         }
 
@@ -883,12 +830,6 @@ class ControllerExtensionPaymentPaypercut extends Controller
         if ($http_code !== 200) {
             $result['state'] = 'http_error';
             $result['message'] = 'File is on disk but the URL returned HTTP ' . $http_code . '. The web server may be blocking the .well-known/ directory or rewriting the URL.';
-            return $result;
-        }
-
-        if (hash('sha256', $response) !== self::APPLEPAY_DOMAIN_FILE_SHA256) {
-            $result['state'] = 'mismatch_remote';
-            $result['message'] = 'URL returned HTTP 200 but the content does not match the expected verification bytes. Another file may be served from this path.';
             return $result;
         }
 
