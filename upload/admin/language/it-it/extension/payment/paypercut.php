@@ -21,6 +21,7 @@ $_['entry_status'] = 'Stato';
 $_['entry_sort_order'] = 'Ordine di Visualizzazione';
 $_['entry_logging'] = 'Abilita Registrazione';
 $_['entry_payment_method_config'] = 'Configurazione Metodo di Pagamento';
+$_['entry_applepay_domain_file'] = 'File di Dominio Apple Pay';
 
 // Help
 $_['help_api_key'] = 'Inserisci la tua Chiave API Paypercut dalla dashboard';
@@ -32,6 +33,7 @@ $_['help_checkout_mode'] = 'Scegli tra hosted (reindirizzamento alla pagina Payp
 $_['help_webhook_url'] = 'Copia questo URL e configuralo nella tua Dashboard Paypercut in Sviluppatori > Webhook';
 $_['help_logging'] = 'Abilita la registrazione di richieste API, eventi webhook ed errori. Disabilita in produzione a meno che non sia necessario il debug. I log possono contenere dati sensibili.';
 $_['help_payment_method_config'] = 'Seleziona una configurazione del metodo di pagamento (profilo di pagamento) per controllare quali metodi di pagamento sono disponibili per i clienti. Lasciare vuoto per utilizzare il predefinito.';
+$_['help_applepay_domain_file'] = 'Apple Pay richiede un file di verifica del dominio in <code>/.well-known/apple-developer-merchantid-domain-association</code>. Il modulo lo distribuisce automaticamente durante l\'installazione e al salvataggio delle impostazioni.';
 
 // Error
 $_['error_permission'] = 'Attenzione: Non hai i permessi per modificare il modulo di pagamento Paypercut!';
@@ -59,6 +61,10 @@ $_['text_wallet_settings'] = 'Impostazioni Wallet';
 $_['text_testing_connection'] = 'Test connessione in corso...';
 $_['text_connection_success'] = 'Connessione riuscita!';
 $_['text_connection_failed'] = 'Connessione fallita';
+$_['text_applepay_domain_ok'] = 'File di dominio Apple Pay verificato';
+$_['text_applepay_domain_warning'] = 'File di dominio Apple Pay distribuito ma non verificato';
+$_['text_applepay_domain_missing'] = 'File di dominio Apple Pay mancante';
+$_['text_applepay_domain_manual_help'] = 'Scarica <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">il file di verifica</a> e posizionalo manualmente in:';
 
 // Button
 $_['button_test_connection'] = 'Testa Connessione';

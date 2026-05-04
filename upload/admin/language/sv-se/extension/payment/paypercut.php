@@ -21,6 +21,7 @@ $_['entry_status'] = 'Status';
 $_['entry_sort_order'] = 'Sorteringsordning';
 $_['entry_logging'] = 'Aktivera loggning';
 $_['entry_payment_method_config'] = 'Betalningsmetodkonfiguration';
+$_['entry_applepay_domain_file'] = 'Apple Pay-domänfil';
 
 // Help
 $_['help_api_key'] = 'Ange din Paypercut API-nyckel från instrumentpanelen';
@@ -32,6 +33,7 @@ $_['help_checkout_mode'] = 'Välj mellan hostad (omdirigering till Paypercut-sid
 $_['help_webhook_url'] = 'Kopiera denna URL och konfigurera den i din Paypercut Dashboard under Utvecklare > Webhooks';
 $_['help_logging'] = 'Aktivera loggning av API-förfrågningar, webhook-händelser och fel. Inaktivera i produktion om inte felsökning pågår. Loggar kan innehålla känsliga data.';
 $_['help_payment_method_config'] = 'Välj en betalningsmetodkonfiguration (betalningsprofil) för att styra vilka betalningsmetoder som är tillgängliga för kunder. Lämna tomt för att använda standard.';
+$_['help_applepay_domain_file'] = 'Apple Pay kräver en domänverifieringsfil på <code>/.well-known/apple-developer-merchantid-domain-association</code>. Tillägget distribuerar den automatiskt vid installation och när inställningar sparas.';
 
 // Error
 $_['error_permission'] = 'Varning: Du har inte behörighet att ändra Paypercut betalningsmodul!';
@@ -59,6 +61,10 @@ $_['text_wallet_settings'] = 'Plånboksinställningar';
 $_['text_testing_connection'] = 'Testar anslutning...';
 $_['text_connection_success'] = 'Anslutning lyckades!';
 $_['text_connection_failed'] = 'Anslutning misslyckades';
+$_['text_applepay_domain_ok'] = 'Apple Pay-domänfil verifierad';
+$_['text_applepay_domain_warning'] = 'Apple Pay-domänfil distribuerad men inte verifierad';
+$_['text_applepay_domain_missing'] = 'Apple Pay-domänfil saknas';
+$_['text_applepay_domain_manual_help'] = 'Ladda ner <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">verifieringsfilen</a> och placera den manuellt på:';
 
 // Button
 $_['button_test_connection'] = 'Testa anslutning';

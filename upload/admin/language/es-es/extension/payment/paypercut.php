@@ -21,6 +21,7 @@ $_['entry_status'] = 'Estado';
 $_['entry_sort_order'] = 'Orden de Clasificación';
 $_['entry_logging'] = 'Habilitar Registro';
 $_['entry_payment_method_config'] = 'Configuración del Método de Pago';
+$_['entry_applepay_domain_file'] = 'Archivo de Dominio Apple Pay';
 
 // Help
 $_['help_api_key'] = 'Ingrese su Clave API de Paypercut desde el panel de control';
@@ -32,6 +33,7 @@ $_['help_checkout_mode'] = 'Elija entre alojado (redirigir a página de Paypercu
 $_['help_webhook_url'] = 'Copie esta URL y configúrela en su Panel de Paypercut en Desarrolladores > Webhooks';
 $_['help_logging'] = 'Habilitar registro de solicitudes API, eventos webhook y errores. Desactivar en producción a menos que esté depurando. Los registros pueden contener datos sensibles.';
 $_['help_payment_method_config'] = 'Seleccione una configuración de método de pago (perfil de pago) para controlar qué métodos de pago están disponibles para los clientes. Dejar vacío para usar el predeterminado.';
+$_['help_applepay_domain_file'] = 'Apple Pay requiere un archivo de verificación de dominio en <code>/.well-known/apple-developer-merchantid-domain-association</code>. El módulo lo despliega automáticamente al instalar y al guardar la configuración.';
 
 // Error
 $_['error_permission'] = 'Advertencia: ¡No tienes permiso para modificar el módulo de pago Paypercut!';
@@ -59,6 +61,10 @@ $_['text_wallet_settings'] = 'Configuración de Billetera';
 $_['text_testing_connection'] = 'Probando conexión...';
 $_['text_connection_success'] = '¡Conexión exitosa!';
 $_['text_connection_failed'] = 'Conexión fallida';
+$_['text_applepay_domain_ok'] = 'Archivo de dominio Apple Pay verificado';
+$_['text_applepay_domain_warning'] = 'Archivo de dominio Apple Pay desplegado pero no verificado';
+$_['text_applepay_domain_missing'] = 'Falta el archivo de dominio Apple Pay';
+$_['text_applepay_domain_manual_help'] = 'Descargue <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">el archivo de verificación</a> y colóquelo manualmente en:';
 
 // Button
 $_['button_test_connection'] = 'Probar Conexión';

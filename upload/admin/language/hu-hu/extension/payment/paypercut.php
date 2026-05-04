@@ -21,6 +21,7 @@ $_['entry_status'] = 'Állapot';
 $_['entry_sort_order'] = 'Rendezési sorrend';
 $_['entry_logging'] = 'Naplózás engedélyezése';
 $_['entry_payment_method_config'] = 'Fizetési módszer konfiguráció';
+$_['entry_applepay_domain_file'] = 'Apple Pay tartományfájl';
 
 // Help
 $_['help_api_key'] = 'Adja meg a Paypercut API kulcsát a vezérlőpultból';
@@ -32,6 +33,7 @@ $_['help_checkout_mode'] = 'Válasszon a tárolt (átirányítás a Paypercut ol
 $_['help_webhook_url'] = 'Másolja ezt az URL-t és konfigurálja a Paypercut vezérlőpultban a Fejlesztők > Webhookok menüpontban';
 $_['help_logging'] = 'API kérések, webhook események és hibák naplózásának engedélyezése. Tiltsa le éles környezetben, kivéve hibakereséskor. A naplók érzékeny adatokat tartalmazhatnak.';
 $_['help_payment_method_config'] = 'Válasszon ki egy fizetési módszer konfigurációt (fizetési profil) annak szabályozására, hogy mely fizetési módok érhetők el az ügyfelek számára. Hagyja üresen az alapértelmezett használatához.';
+$_['help_applepay_domain_file'] = 'Az Apple Pay-hez tartomány-ellenőrző fájl szükséges itt: <code>/.well-known/apple-developer-merchantid-domain-association</code>. A bővítmény telepítéskor és a beállítások mentésekor automatikusan kihelyezi.';
 
 // Error
 $_['error_permission'] = 'Figyelmeztetés: Nincs jogosultsága a Paypercut fizetési modul módosítására!';
@@ -59,6 +61,10 @@ $_['text_wallet_settings'] = 'Tárca beállítások';
 $_['text_testing_connection'] = 'Kapcsolat tesztelése...';
 $_['text_connection_success'] = 'Kapcsolat sikeres!';
 $_['text_connection_failed'] = 'Kapcsolat sikertelen';
+$_['text_applepay_domain_ok'] = 'Apple Pay tartományfájl ellenőrizve';
+$_['text_applepay_domain_warning'] = 'Apple Pay tartományfájl kihelyezve, de nincs ellenőrizve';
+$_['text_applepay_domain_missing'] = 'Az Apple Pay tartományfájl hiányzik';
+$_['text_applepay_domain_manual_help'] = 'Töltse le <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">az ellenőrzőfájlt</a>, és helyezze el kézzel itt:';
 
 // Button
 $_['button_test_connection'] = 'Kapcsolat tesztelése';

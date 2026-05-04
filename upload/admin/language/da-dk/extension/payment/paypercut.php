@@ -21,6 +21,7 @@ $_['entry_status'] = 'Status';
 $_['entry_sort_order'] = 'Sorteringsrækkefølge';
 $_['entry_logging'] = 'Aktivér logning';
 $_['entry_payment_method_config'] = 'Betalingsmetodekonfiguration';
+$_['entry_applepay_domain_file'] = 'Apple Pay-domænefil';
 
 // Help
 $_['help_api_key'] = 'Indtast din Paypercut API-nøgle fra dashboardet';
@@ -32,6 +33,7 @@ $_['help_checkout_mode'] = 'Vælg mellem hostet (omdirigering til Paypercut-side
 $_['help_webhook_url'] = 'Kopiér denne URL og konfigurér den i dit Paypercut Dashboard under Udviklere > Webhooks';
 $_['help_logging'] = 'Aktivér logning af API-anmodninger, webhook-hændelser og fejl. Deaktiver i produktion, medmindre der fejlsøges. Logs kan indeholde følsomme data.';
 $_['help_payment_method_config'] = 'Vælg en betalingsmetodekonfiguration (betalingsprofil) for at styre, hvilke betalingsmetoder der er tilgængelige for kunder. Lad stå tomt for at bruge standard.';
+$_['help_applepay_domain_file'] = 'Apple Pay kræver en domæne-verificeringsfil på <code>/.well-known/apple-developer-merchantid-domain-association</code>. Modulet udruller den automatisk ved installation og når indstillinger gemmes.';
 
 // Error
 $_['error_permission'] = 'Advarsel: Du har ikke tilladelse til at ændre Paypercut betalingsmodulet!';
@@ -59,6 +61,10 @@ $_['text_wallet_settings'] = 'Wallet-indstillinger';
 $_['text_testing_connection'] = 'Tester forbindelse...';
 $_['text_connection_success'] = 'Forbindelse oprettet!';
 $_['text_connection_failed'] = 'Forbindelse mislykkedes';
+$_['text_applepay_domain_ok'] = 'Apple Pay-domænefilen er verificeret';
+$_['text_applepay_domain_warning'] = 'Apple Pay-domænefilen er udrullet, men ikke verificeret';
+$_['text_applepay_domain_missing'] = 'Apple Pay-domænefilen mangler';
+$_['text_applepay_domain_manual_help'] = 'Download <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">verificeringsfilen</a>, og placér den manuelt på:';
 
 // Button
 $_['button_test_connection'] = 'Test forbindelse';

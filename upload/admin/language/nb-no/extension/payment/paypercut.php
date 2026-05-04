@@ -21,6 +21,7 @@ $_['entry_status'] = 'Status';
 $_['entry_sort_order'] = 'Sorteringsrekkefølge';
 $_['entry_logging'] = 'Aktiver logging';
 $_['entry_payment_method_config'] = 'Betalingsmetode-konfigurasjon';
+$_['entry_applepay_domain_file'] = 'Apple Pay-domenefil';
 
 // Help
 $_['help_api_key'] = 'Skriv inn din Paypercut API-nøkkel fra kontrollpanelet';
@@ -32,6 +33,7 @@ $_['help_checkout_mode'] = 'Velg mellom vertshåndtert (omdirigering til Payperc
 $_['help_webhook_url'] = 'Kopier denne URL-en og konfigurer den i Paypercut-kontrollpanelet under Utviklere > Webhooks';
 $_['help_logging'] = 'Aktiver logging av API-forespørsler, webhook-hendelser og feil. Deaktiver i produksjon med mindre du feilsøker. Logger kan inneholde sensitive data.';
 $_['help_payment_method_config'] = 'Velg en betalingsmetode-konfigurasjon (betalingsprofil) for å kontrollere hvilke betalingsmetoder som er tilgjengelige for kunder. La stå tom for å bruke standard.';
+$_['help_applepay_domain_file'] = 'Apple Pay krever en domeneverifiseringsfil på <code>/.well-known/apple-developer-merchantid-domain-association</code>. Modulen distribuerer den automatisk ved installasjon og når innstillinger lagres.';
 
 // Error
 $_['error_permission'] = 'Advarsel: Du har ikke tillatelse til å endre Paypercut betalingsmodul!';
@@ -59,6 +61,10 @@ $_['text_wallet_settings'] = 'Lommebokinnstillinger';
 $_['text_testing_connection'] = 'Tester tilkobling...';
 $_['text_connection_success'] = 'Tilkobling vellykket!';
 $_['text_connection_failed'] = 'Tilkobling mislyktes';
+$_['text_applepay_domain_ok'] = 'Apple Pay-domenefil verifisert';
+$_['text_applepay_domain_warning'] = 'Apple Pay-domenefil distribuert, men ikke verifisert';
+$_['text_applepay_domain_missing'] = 'Apple Pay-domenefil mangler';
+$_['text_applepay_domain_manual_help'] = 'Last ned <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">verifiseringsfilen</a>, og plasser den manuelt på:';
 
 // Button
 $_['button_test_connection'] = 'Test tilkobling';
