@@ -21,6 +21,7 @@ $_['entry_status'] = 'Status';
 $_['entry_sort_order'] = 'Sort Order';
 $_['entry_logging'] = 'Enable Logging';
 $_['entry_payment_method_config'] = 'Payment Method Configuration';
+$_['entry_applepay_domain_file'] = 'Apple Pay Domain File';
 
 // Help
 $_['help_api_key'] = 'Enter your Paypercut API Key from the dashboard';
@@ -32,6 +33,7 @@ $_['help_checkout_mode'] = 'Choose between hosted (redirect to Paypercut page) o
 $_['help_webhook_url'] = 'Copy this URL and configure it in your Paypercut Dashboard under Developers > Webhooks';
 $_['help_logging'] = 'Enable logging of API requests, webhook events, and errors. Disable in production unless debugging. Logs may contain sensitive data.';
 $_['help_payment_method_config'] = 'Select a payment method configuration (payment profile) to control which payment methods are available to customers. Leave empty to use default.';
+$_['help_applepay_domain_file'] = 'Apple Pay requires a verification file at <code>/.well-known/apple-developer-merchantid-domain-association</code>. The plugin deploys it automatically on install and on save.';
 
 // Error
 $_['error_permission'] = 'Warning: You do not have permission to modify Paypercut payment module!';
@@ -59,6 +61,10 @@ $_['text_wallet_settings'] = 'Wallet Settings';
 $_['text_testing_connection'] = 'Testing connection...';
 $_['text_connection_success'] = 'Connection successful!';
 $_['text_connection_failed'] = 'Connection failed';
+$_['text_applepay_domain_ok'] = 'Apple Pay domain file verified';
+$_['text_applepay_domain_warning'] = 'Apple Pay domain file deployed but not verified';
+$_['text_applepay_domain_missing'] = 'Apple Pay domain file is missing';
+$_['text_applepay_domain_manual_help'] = 'Download <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">the verification file</a> and place it manually at:';
 
 // Refund
 $_['text_refund_success'] = 'Refund processed successfully!';

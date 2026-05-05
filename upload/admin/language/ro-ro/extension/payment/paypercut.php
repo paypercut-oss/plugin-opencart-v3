@@ -21,6 +21,7 @@ $_['entry_status'] = 'Status';
 $_['entry_sort_order'] = 'Ordine Sortare';
 $_['entry_logging'] = 'Activează Jurnalizarea';
 $_['entry_payment_method_config'] = 'Configurare Metodă de Plată';
+$_['entry_applepay_domain_file'] = 'Fișier Domeniu Apple Pay';
 
 // Help
 $_['help_api_key'] = 'Introduceți cheia API Paypercut din tabloul de bord';
@@ -32,6 +33,7 @@ $_['help_checkout_mode'] = 'Alegeți între găzduit (redirecționare către pag
 $_['help_webhook_url'] = 'Copiați acest URL și configurați-l în tabloul de bord Paypercut la Dezvoltatori > Webhooks';
 $_['help_logging'] = 'Activează jurnalizarea cererilor API, evenimentelor webhook și erorilor. Dezactivați în producție, cu excepția cazului în care depanați. Jurnalele pot conține date sensibile.';
 $_['help_payment_method_config'] = 'Selectați o configurare a metodei de plată (profil de plată) pentru a controla care metode de plată sunt disponibile pentru clienți. Lăsați gol pentru a utiliza valoarea implicită.';
+$_['help_applepay_domain_file'] = 'Apple Pay necesită un fișier de verificare a domeniului la <code>/.well-known/apple-developer-merchantid-domain-association</code>. Modulul îl implementează automat la instalare și la salvarea setărilor.';
 
 // Error
 $_['error_permission'] = 'Avertisment: Nu aveți permisiunea de a modifica modulul de plată Paypercut!';
@@ -59,6 +61,10 @@ $_['text_wallet_settings'] = 'Setări Portofel';
 $_['text_testing_connection'] = 'Se testează conexiunea...';
 $_['text_connection_success'] = 'Conexiune reușită!';
 $_['text_connection_failed'] = 'Conexiune eșuată';
+$_['text_applepay_domain_ok'] = 'Fișier domeniu Apple Pay verificat';
+$_['text_applepay_domain_warning'] = 'Fișier domeniu Apple Pay implementat, dar neverificat';
+$_['text_applepay_domain_missing'] = 'Fișierul de domeniu Apple Pay lipsește';
+$_['text_applepay_domain_manual_help'] = 'Descărcați <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">fișierul de verificare</a> și plasați-l manual la:';
 
 // Button
 $_['button_test_connection'] = 'Testează Conexiunea';

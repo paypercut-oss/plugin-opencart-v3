@@ -21,6 +21,7 @@ $_['entry_status'] = 'Status';
 $_['entry_sort_order'] = 'Kolejność Sortowania';
 $_['entry_logging'] = 'Włącz Logowanie';
 $_['entry_payment_method_config'] = 'Konfiguracja Metod Płatności';
+$_['entry_applepay_domain_file'] = 'Plik Domeny Apple Pay';
 
 // Help
 $_['help_api_key'] = 'Wprowadź swój klucz API Paypercut z panelu';
@@ -32,6 +33,7 @@ $_['help_checkout_mode'] = 'Wybierz między hostowanym (przekierowanie na stron�
 $_['help_webhook_url'] = 'Skopiuj ten adres URL i skonfiguruj go w panelu Paypercut w zakładce Developers > Webhooks';
 $_['help_logging'] = 'Włącz logowanie żądań API, zdarzeń webhook i błędów. Wyłącz w środowisku produkcyjnym, chyba że debugujesz. Logi mogą zawierać poufne dane.';
 $_['help_payment_method_config'] = 'Wybierz konfigurację metody płatności (profil płatności), aby kontrolować, które metody płatności są dostępne dla klientów. Pozostaw puste, aby użyć domyślnej.';
+$_['help_applepay_domain_file'] = 'Apple Pay wymaga pliku weryfikacji domeny pod adresem <code>/.well-known/apple-developer-merchantid-domain-association</code>. Wtyczka wdraża go automatycznie podczas instalacji oraz przy zapisywaniu ustawień.';
 
 // Error
 $_['error_permission'] = 'Ostrzeżenie: Nie masz uprawnień do modyfikacji modułu płatności Paypercut!';
@@ -59,6 +61,10 @@ $_['text_wallet_settings'] = 'Ustawienia Portfela';
 $_['text_testing_connection'] = 'Testowanie połączenia...';
 $_['text_connection_success'] = 'Połączenie udane!';
 $_['text_connection_failed'] = 'Połączenie nieudane';
+$_['text_applepay_domain_ok'] = 'Plik domeny Apple Pay zweryfikowany';
+$_['text_applepay_domain_warning'] = 'Plik domeny Apple Pay wdrożony, ale niezweryfikowany';
+$_['text_applepay_domain_missing'] = 'Brak pliku domeny Apple Pay';
+$_['text_applepay_domain_manual_help'] = 'Pobierz <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">plik weryfikacyjny</a> i umieść go ręcznie w:';
 
 // Button
 $_['button_test_connection'] = 'Testuj Połączenie';

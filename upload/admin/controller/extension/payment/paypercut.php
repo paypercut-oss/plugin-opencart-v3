@@ -3,6 +3,9 @@ class ControllerExtensionPaymentPaypercut extends Controller
 {
     private $error = array();
 
+    // Apple Pay domain verification file — see https://docs.paypercut.io/docs/accept-payments/apple-pay
+    // Bundled at upload/system/library/paypercut/applepay/apple-developer-merchantid-domain-association.
+
     public function index()
     {
         $this->load->language('extension/payment/paypercut');
@@ -95,6 +98,9 @@ class ControllerExtensionPaymentPaypercut extends Controller
         // Check webhook status
         $data['webhook_status'] = $this->checkWebhookStatus();
 
+        // Apple Pay domain verification file status (used by the Apple Pay toggle row)
+        $data['applepay_domain_status'] = $this->checkApplePayDomainFile();
+
         // Payment method configuration
         if (isset($this->request->post['payment_paypercut_payment_method_config'])) {
             $data['payment_paypercut_payment_method_config'] = $this->request->post['payment_paypercut_payment_method_config'];
@@ -179,6 +185,14 @@ class ControllerExtensionPaymentPaypercut extends Controller
             if (!$domain_status['success']) {
                 // Don't block saving, just show a warning
                 $this->session->data['warning'] = 'Settings saved, but domain registration failed: ' . $domain_status['message'] . '. Wallet payment methods (Apple Pay, Google Pay) may not work until the domain is properly registered in your Paypercut dashboard.';
+            }
+
+            // Re-deploy the Apple Pay domain association file in case the upgrade path
+            // skipped install() or the file was removed manually. Idempotent.
+            $applepay_deploy = $this->deployApplePayDomainAssociation();
+            if (!$applepay_deploy['success']) {
+                $existing_warning = isset($this->session->data['warning']) ? $this->session->data['warning'] . ' ' : '';
+                $this->session->data['warning'] = $existing_warning . 'Apple Pay domain verification file could not be deployed: ' . $applepay_deploy['message'] . ' Apple Pay will not work until this is resolved.';
             }
         }
 
@@ -726,6 +740,105 @@ class ControllerExtensionPaymentPaypercut extends Controller
     }
 
     /**
+     * Deploy the Apple Pay domain association file from the bundled location
+     * to the storefront's webroot at .well-known/apple-developer-merchantid-domain-association.
+     * Never throws — returns a structured result so callers can surface a warning.
+     */
+    private function deployApplePayDomainAssociation()
+    {
+        $source = DIR_SYSTEM . 'library/paypercut/applepay/apple-developer-merchantid-domain-association';
+        $well_known_dir = DIR_OPENCART . '.well-known/';
+        $destination = $well_known_dir . 'apple-developer-merchantid-domain-association';
+
+        if (!is_file($source)) {
+            $this->log->write('Paypercut Apple Pay file deploy: bundled file missing at ' . $source);
+            return array(
+                'success' => false,
+                'message' => 'Verification file not found in plugin package at ' . $source . '.',
+                'path' => $destination
+            );
+        }
+
+        if (!is_dir($well_known_dir)) {
+            if (!@mkdir($well_known_dir, 0755, true) && !is_dir($well_known_dir)) {
+                $this->log->write('Paypercut Apple Pay file deploy: failed to create directory ' . $well_known_dir);
+                return array(
+                    'success' => false,
+                    'message' => 'Could not create .well-known/ directory at ' . $well_known_dir . '. Check filesystem permissions on the OpenCart root.',
+                    'path' => $destination
+                );
+            }
+        }
+
+        if (!@copy($source, $destination)) {
+            $this->log->write('Paypercut Apple Pay file deploy: copy failed from ' . $source . ' to ' . $destination);
+            return array(
+                'success' => false,
+                'message' => 'Could not write verification file to ' . $destination . '. Check filesystem permissions on the OpenCart root.',
+                'path' => $destination
+            );
+        }
+
+        @chmod($destination, 0644);
+
+        return array(
+            'success' => true,
+            'message' => 'Apple Pay verification file deployed.',
+            'path' => $destination
+        );
+    }
+
+    /**
+     * Self-test: confirm the verification file is on disk and reachable over HTTPS at the storefront URL.
+     */
+    private function checkApplePayDomainFile()
+    {
+        $destination = DIR_OPENCART . '.well-known/apple-developer-merchantid-domain-association';
+        $public_url = HTTPS_CATALOG . '.well-known/apple-developer-merchantid-domain-association';
+
+        $result = array(
+            'public_url' => $public_url,
+            'local_path' => $destination,
+            'state' => 'missing',
+            'message' => ''
+        );
+
+        if (!is_file($destination)) {
+            $result['message'] = 'Verification file is not deployed. Save settings or reinstall the extension to deploy.';
+            return $result;
+        }
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $public_url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curl_error = curl_error($ch);
+        curl_close($ch);
+
+        if ($response === false || $http_code === 0) {
+            $result['state'] = 'unreachable';
+            $result['message'] = 'File is on disk but the URL could not be reached from this server' . ($curl_error ? ' (' . $curl_error . ')' : '') . '. The merchant\'s browser may still reach it; verify in a browser.';
+            return $result;
+        }
+
+        if ($http_code !== 200) {
+            $result['state'] = 'http_error';
+            $result['message'] = 'File is on disk but the URL returned HTTP ' . $http_code . '. The web server may be blocking the .well-known/ directory or rewriting the URL.';
+            return $result;
+        }
+
+        $result['state'] = 'ok';
+        $result['message'] = 'Apple Pay verification file is deployed and reachable.';
+        return $result;
+    }
+
+    /**
      * Install method - Called when extension is installed
      * Creates database tables and registers events
      */
@@ -819,6 +932,14 @@ class ControllerExtensionPaymentPaypercut extends Controller
             'admin/view/sale/order_info/after',
             'extension/payment/paypercut_order/info'
         );
+
+        // Deploy the Apple Pay domain verification file to <webroot>/.well-known/.
+        // Non-blocking: install must succeed even if the webroot is not writable.
+        $applepay_deploy = $this->deployApplePayDomainAssociation();
+        if (!$applepay_deploy['success']) {
+            $existing_warning = isset($this->session->data['warning']) ? $this->session->data['warning'] . ' ' : '';
+            $this->session->data['warning'] = $existing_warning . 'Paypercut installed, but Apple Pay verification file could not be deployed: ' . $applepay_deploy['message'] . ' Apple Pay will not work until this is resolved. Download the file from https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association and place it at ' . DIR_OPENCART . '.well-known/apple-developer-merchantid-domain-association manually.';
+        }
     }
 
     /**

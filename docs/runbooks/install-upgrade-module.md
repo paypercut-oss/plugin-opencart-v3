@@ -46,6 +46,10 @@
 - Admin **Extensions → Payments → Paypercut Payments → Logs** (or the
   `extension/payment/paypercut_logs` route) records the test order
   request/response.
+- **Apple Pay domain file** — on the Paypercut settings page, the *Apple
+  Pay Domain File* row is green. Confirm with
+  `curl -I https://<storefront>/.well-known/apple-developer-merchantid-domain-association`
+  returns `HTTP/1.1 200`.
 
 ## Rollback
 
@@ -64,6 +68,8 @@
 | Module not visible under Payments | Modifications not refreshed, or Twig cache stale | Click **Refresh** in Extensions → Modifications, clear `system/storage/cache/` |
 | Checkout shows no PayPerCut option | Not enabled, or geo/currency restriction | Re-check extension settings and cart currency |
 | Test order errors out | Bad API credentials | Re-enter credentials; see [webhook-not-received.md](webhook-not-received.md) for post-payment issues |
+| Apple Pay button missing in Safari | Domain verification file not reachable | Open the Paypercut settings page and check the *Apple Pay Domain File* row. If red/missing: OpenCart root not writable by PHP — `chmod` the root to allow writes, then re-save settings. If yellow/unreachable or HTTP-error: web server is blocking `.well-known/` (check Apache/Nginx config) or `DIR_OPENCART` does not match the storefront's document root (multi-store / split admin). Manual fallback: download the file from `https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association` and FTP it to `<webroot>/.well-known/apple-developer-merchantid-domain-association`. |
+| Apple Pay verified by Stripe / other PSP previously | File at `.well-known/apple-developer-merchantid-domain-association` is overwritten on Paypercut install/save | Apple's protocol allows only one PSP's verification file at this path. Choose one provider; if reverting to the prior PSP, restore their file manually. Overwrite events are logged via `$this->log->write(...)` — check the OpenCart error log. |
 
 ## Escalation
 

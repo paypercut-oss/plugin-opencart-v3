@@ -21,6 +21,7 @@ $_['entry_status'] = 'Status';
 $_['entry_sort_order'] = 'Sortierreihenfolge';
 $_['entry_logging'] = 'Protokollierung aktivieren';
 $_['entry_payment_method_config'] = 'Zahlungsmethoden-Konfiguration';
+$_['entry_applepay_domain_file'] = 'Apple Pay-Domain-Datei';
 
 // Help
 $_['help_api_key'] = 'Geben Sie Ihren Paypercut-API-Schlüssel aus dem Dashboard ein';
@@ -32,6 +33,7 @@ $_['help_checkout_mode'] = 'Wählen Sie zwischen gehostet (Weiterleitung zur Pay
 $_['help_webhook_url'] = 'Kopieren Sie diese URL und konfigurieren Sie sie in Ihrem Paypercut-Dashboard unter Entwickler > Webhooks';
 $_['help_logging'] = 'Protokollierung von API-Anfragen, Webhook-Ereignissen und Fehlern aktivieren. Im Produktivbetrieb deaktivieren, es sei denn, Sie debuggen. Protokolle können sensible Daten enthalten.';
 $_['help_payment_method_config'] = 'Wählen Sie eine Zahlungsmethoden-Konfiguration (Zahlungsprofil), um zu steuern, welche Zahlungsmethoden den Kunden zur Verfügung stehen. Leer lassen, um Standard zu verwenden.';
+$_['help_applepay_domain_file'] = 'Apple Pay benötigt eine Domain-Verifizierungsdatei unter <code>/.well-known/apple-developer-merchantid-domain-association</code>. Das Modul stellt sie automatisch bei der Installation und beim Speichern der Einstellungen bereit.';
 
 // Error
 $_['error_permission'] = 'Warnung: Sie haben keine Berechtigung, das Paypercut-Zahlungsmodul zu ändern!';
@@ -59,6 +61,10 @@ $_['text_wallet_settings'] = 'Wallet-Einstellungen';
 $_['text_testing_connection'] = 'Verbindung wird getestet...';
 $_['text_connection_success'] = 'Verbindung erfolgreich!';
 $_['text_connection_failed'] = 'Verbindung fehlgeschlagen';
+$_['text_applepay_domain_ok'] = 'Apple Pay-Domain-Datei verifiziert';
+$_['text_applepay_domain_warning'] = 'Apple Pay-Domain-Datei bereitgestellt, aber nicht verifiziert';
+$_['text_applepay_domain_missing'] = 'Apple Pay-Domain-Datei fehlt';
+$_['text_applepay_domain_manual_help'] = 'Laden Sie <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">die Verifizierungsdatei</a> herunter und legen Sie sie manuell ab unter:';
 
 // Button
 $_['button_test_connection'] = 'Verbindung testen';

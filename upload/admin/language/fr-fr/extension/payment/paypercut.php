@@ -21,6 +21,7 @@ $_['entry_status'] = 'Statut';
 $_['entry_sort_order'] = 'Ordre de Tri';
 $_['entry_logging'] = 'Activer la Journalisation';
 $_['entry_payment_method_config'] = 'Configuration des Méthodes de Paiement';
+$_['entry_applepay_domain_file'] = 'Fichier de Domaine Apple Pay';
 
 // Help
 $_['help_api_key'] = 'Entrez votre clé API Paypercut depuis le tableau de bord';
@@ -32,6 +33,7 @@ $_['help_checkout_mode'] = 'Choisissez entre hébergé (redirection vers la page
 $_['help_webhook_url'] = 'Copiez cette URL et configurez-la dans votre tableau de bord Paypercut sous Développeurs > Webhooks';
 $_['help_logging'] = 'Activer la journalisation des requêtes API, événements webhook et erreurs. Désactiver en production sauf pour le débogage. Les journaux peuvent contenir des données sensibles.';
 $_['help_payment_method_config'] = 'Sélectionnez une configuration de méthode de paiement (profil de paiement) pour contrôler quelles méthodes de paiement sont disponibles pour les clients. Laisser vide pour utiliser la valeur par défaut.';
+$_['help_applepay_domain_file'] = 'Apple Pay nécessite un fichier de vérification de domaine à <code>/.well-known/apple-developer-merchantid-domain-association</code>. Le module le déploie automatiquement à l\'installation et à l\'enregistrement des paramètres.';
 
 // Error
 $_['error_permission'] = 'Attention : Vous n\'avez pas la permission de modifier le module de paiement Paypercut !';
@@ -59,6 +61,10 @@ $_['text_wallet_settings'] = 'Paramètres du Portefeuille';
 $_['text_testing_connection'] = 'Test de la connexion...';
 $_['text_connection_success'] = 'Connexion réussie !';
 $_['text_connection_failed'] = 'Échec de la connexion';
+$_['text_applepay_domain_ok'] = 'Fichier de domaine Apple Pay vérifié';
+$_['text_applepay_domain_warning'] = 'Fichier de domaine Apple Pay déployé mais non vérifié';
+$_['text_applepay_domain_missing'] = 'Fichier de domaine Apple Pay manquant';
+$_['text_applepay_domain_manual_help'] = 'Téléchargez <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">le fichier de vérification</a> et placez-le manuellement à :';
 
 // Button
 $_['button_test_connection'] = 'Tester la Connexion';

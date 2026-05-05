@@ -21,6 +21,7 @@ $_['entry_status'] = 'Статус';
 $_['entry_sort_order'] = 'Ред на сортиране';
 $_['entry_logging'] = 'Активиране на логване';
 $_['entry_payment_method_config'] = 'Конфигурация на метод за плащане';
+$_['entry_applepay_domain_file'] = 'Файл за домейн на Apple Pay';
 
 // Help
 $_['help_api_key'] = 'Въведете вашия Paypercut API ключ от таблото за управление';
@@ -32,6 +33,7 @@ $_['help_checkout_mode'] = 'Изберете между хоствано (пре
 $_['help_webhook_url'] = 'Копирайте този URL и го конфигурирайте в таблото за управление на Paypercut в секция Разработчици > Webhooks';
 $_['help_logging'] = 'Активирайте логване на API заявки, webhook събития и грешки. Деактивирайте в продукция, освен ако не отстранявате грешки. Логовете могат да съдържат чувствителни данни.';
 $_['help_payment_method_config'] = 'Изберете конфигурация на метод за плащане (платежен профил), за да контролирате кои методи за плащане са достъпни за клиентите. Оставете празно, за да използвате по подразбиране.';
+$_['help_applepay_domain_file'] = 'Apple Pay изисква файл за проверка на домейн на адрес <code>/.well-known/apple-developer-merchantid-domain-association</code>. Плъгинът го разполага автоматично при инсталация и при запазване на настройките.';
 
 // Error
 $_['error_permission'] = 'Предупреждение: Нямате разрешение да променяте модула за плащане Paypercut!';
@@ -59,6 +61,10 @@ $_['text_wallet_settings'] = 'Настройки на портфейл';
 $_['text_testing_connection'] = 'Тестване на връзката...';
 $_['text_connection_success'] = 'Връзката е успешна!';
 $_['text_connection_failed'] = 'Връзката се провали';
+$_['text_applepay_domain_ok'] = 'Файлът за домейн на Apple Pay е проверен';
+$_['text_applepay_domain_warning'] = 'Файлът за домейн на Apple Pay е разположен, но не е проверен';
+$_['text_applepay_domain_missing'] = 'Файлът за домейн на Apple Pay липсва';
+$_['text_applepay_domain_manual_help'] = 'Изтеглете <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">файла за проверка</a> и го поставете ръчно на:';
 
 // Button
 $_['button_test_connection'] = 'Тест на връзката';
