@@ -312,6 +312,8 @@ class ControllerExtensionPaymentPaypercut extends Controller
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
         curl_setopt($ch, CURLOPT_HTTPHEADER, array(
             'Authorization: Bearer ' . $api_key,
             'Content-Type: application/json'
@@ -336,6 +338,8 @@ class ControllerExtensionPaymentPaypercut extends Controller
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
         curl_setopt($ch, CURLOPT_HTTPHEADER, array(
             'Authorization: Bearer ' . $api_key,
             'Content-Type: application/json'
@@ -722,6 +726,8 @@ class ControllerExtensionPaymentPaypercut extends Controller
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
         curl_setopt($ch, CURLOPT_HTTPHEADER, array(
             'Authorization: Bearer ' . $api_key,
             'Content-Type: application/json'
@@ -747,7 +753,9 @@ class ControllerExtensionPaymentPaypercut extends Controller
     private function deployApplePayDomainAssociation()
     {
         $source = DIR_SYSTEM . 'library/paypercut/applepay/apple-developer-merchantid-domain-association';
-        $well_known_dir = DIR_OPENCART . '.well-known/';
+        // DIR_APPLICATION is <webroot>/admin/ in OpenCart 3.x admin context; its parent is the
+        // storefront webroot that HTTPS_CATALOG serves. (OpenCart 3.x has no DIR_OPENCART constant.)
+        $well_known_dir = dirname(DIR_APPLICATION) . '/.well-known/';
         $destination = $well_known_dir . 'apple-developer-merchantid-domain-association';
 
         if (!is_file($source)) {
@@ -793,7 +801,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
      */
     private function checkApplePayDomainFile()
     {
-        $destination = DIR_OPENCART . '.well-known/apple-developer-merchantid-domain-association';
+        $destination = dirname(DIR_APPLICATION) . '/.well-known/apple-developer-merchantid-domain-association';
         $public_url = HTTPS_CATALOG . '.well-known/apple-developer-merchantid-domain-association';
 
         $result = array(
@@ -938,7 +946,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
         $applepay_deploy = $this->deployApplePayDomainAssociation();
         if (!$applepay_deploy['success']) {
             $existing_warning = isset($this->session->data['warning']) ? $this->session->data['warning'] . ' ' : '';
-            $this->session->data['warning'] = $existing_warning . 'Paypercut installed, but Apple Pay verification file could not be deployed: ' . $applepay_deploy['message'] . ' Apple Pay will not work until this is resolved. Download the file from https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association and place it at ' . DIR_OPENCART . '.well-known/apple-developer-merchantid-domain-association manually.';
+            $this->session->data['warning'] = $existing_warning . 'Paypercut installed, but Apple Pay verification file could not be deployed: ' . $applepay_deploy['message'] . ' Apple Pay will not work until this is resolved. Download the file from https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association and place it at ' . dirname(DIR_APPLICATION) . '/.well-known/apple-developer-merchantid-domain-association manually.';
         }
     }
 
