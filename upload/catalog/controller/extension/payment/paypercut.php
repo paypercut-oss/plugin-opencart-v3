@@ -1,4 +1,6 @@
 <?php
+define('PAYPERCUT_PLUGIN_VERSION', '1.0.5');
+
 class ControllerExtensionPaymentPaypercut extends Controller
 {
     public function index()
@@ -1250,6 +1252,17 @@ class ControllerExtensionPaymentPaypercut extends Controller
             if ($locale) {
                 $payload['locale'] = $locale;
             }
+
+            // Platform metadata
+            $payload['metadata'] = array(
+                'platform'                     => 'opencart',
+                'platform_version'             => VERSION,
+                'plugin_version'               => PAYPERCUT_PLUGIN_VERSION,
+                'php_version'                  => PHP_VERSION,
+                'site_url'                     => defined('HTTPS_SERVER') ? HTTPS_SERVER : (defined('HTTP_SERVER') ? HTTP_SERVER : ''),
+                'paypercut_checkout_mode'      => $ui_mode,
+                'paypercut_checkout_operation' => 'payment',
+            );
 
             // Make API request with timeout handling
             $ch = curl_init();
