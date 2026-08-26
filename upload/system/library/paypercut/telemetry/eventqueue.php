@@ -16,6 +16,13 @@ class EventQueue
      */
     public static function append(array $envelopes)
     {
+        // end() deletes the queue. Without this a request that buffered events
+        // before teardown would recreate the row from its shutdown handler,
+        // leaving a live queue behind a session that is supposed to be gone.
+        if (!TelemetrySession::isActiveFast()) {
+            return;
+        }
+
         $envelopes = self::assertSafe($envelopes);
 
         if (empty($envelopes)) {
@@ -55,17 +62,11 @@ class EventQueue
         $safe = array();
 
         foreach ($envelopes as $envelope) {
-            // `error` is a top-level sibling of `attrs`, so it has to be named
-            // here or it bypasses the one gate every producer funnels through.
-            $screened = array();
-
-            foreach (array('attrs', 'error') as $field) {
-                if (isset($envelope[$field]) && is_array($envelope[$field])) {
-                    $screened[$field] = $envelope[$field];
-                }
+            if (!is_array($envelope)) {
+                continue;
             }
 
-            if (Event::isDenied($screened, $secrets)) {
+            if (self::screen($envelope, $secrets)) {
                 // The event name only — never the envelope.
                 Context::audit(
                     'Telemetry: event dropped by the deny assertion',
@@ -79,6 +80,22 @@ class EventQueue
         }
 
         return $safe;
+    }
+
+    /**
+     * True when this envelope must not be sent.
+     *
+     * The whole serialised envelope is screened, not a named subset of it:
+     * `order_ref`, `payment_id` and `payment_intent_id` are top-level siblings
+     * of `attrs`, and on the webhook path their values come from an
+     * unauthenticated request body. Anything added to the wire shape later is
+     * covered by construction rather than by remembering to list it.
+     *
+     * Public so the suite can exercise the real gate rather than a copy of it.
+     */
+    public static function screen(array $envelope, array $secrets = array())
+    {
+        return Event::isDenied($envelope, $secrets);
     }
 
     /**

@@ -80,6 +80,15 @@ class Event
         'store_currency' => 'identifier'
     );
 
+    /**
+     * Fatal shapes worth distinguishing, matched on their fixed prefix.
+     */
+    private static $fatal_categories = array(
+        'Allowed memory size of' => 'memory_exhausted',
+        'Maximum execution time of' => 'max_execution_time',
+        'Out of memory' => 'memory_exhausted'
+    );
+
     private $name;
 
     private $fields;
@@ -110,6 +119,9 @@ class Event
 
     /**
      * Report a failure, under whichever event name describes where it happened.
+     *
+     * An exception contributes its class, its stack and its origin — never its
+     * message. Use ->because() for a message this module authored itself.
      */
     public static function failure($name, $code, array $attrs = array(), $exception = null)
     {
@@ -118,8 +130,10 @@ class Event
         $event->error = array('code' => self::text($code) ? self::text($code) : 'unknown');
 
         if ($exception !== null) {
+            // Never the message: OpenCart's mysqli adapter puts the whole
+            // failing SQL — and `username@hostname` on a connection error —
+            // into it. The class, the stack and `code` carry the diagnosis.
             $event->error['type'] = self::shortClassName($exception);
-            $event->error['message'] = self::text($exception->getMessage());
             $event->error['stack'] = self::stack($exception);
 
             $event->fields = array_merge(self::origin(self::frameFiles($exception)), $event->fields);
@@ -185,10 +199,12 @@ class Event
 
         $event->fields = array_merge(self::origin(array($file)), $event->fields);
 
+        $summary = self::fatalSummary((string)$message);
+
         $event->error = array(
             'code' => 'php_fatal',
-            'type' => 'FatalError',
-            'message' => self::text(self::fatalMessage($message)),
+            'type' => $summary['type'],
+            'message' => $summary['message'],
             'stack' => array(self::relativePath($file) . ':' . (int)$line)
         );
 
@@ -280,14 +296,32 @@ class Event
 
     /**
      * Attach the ids that join this event to a payment.
+     *
+     * The two Paypercut ids are identifier-constrained, not merely clamped:
+     * on the webhook path they come from a request body that is unsigned
+     * whenever no webhook secret is configured, so an id that is not
+     * identifier-shaped is not ours and is dropped rather than forwarded.
+     * `order_ref` is the merchant's own reference and keeps its own format.
      */
     public function about(array $correlation)
     {
-        foreach (array('payment_intent_id', 'payment_id', 'order_ref') as $field) {
+        $shapes = array(
+            'payment_intent_id' => 'identifier',
+            'payment_id' => 'identifier',
+            'order_ref' => 'text'
+        );
+
+        foreach ($shapes as $field => $shape) {
             $value = trim((string)(isset($correlation[$field]) ? $correlation[$field] : ''));
 
-            if ($value !== '') {
-                $this->correlation[$field] = self::text($value);
+            if ($value === '') {
+                continue;
+            }
+
+            $clean = $shape === 'identifier' ? self::identifier($value) : self::text($value);
+
+            if ($clean !== '') {
+                $this->correlation[$field] = $clean;
             }
         }
 
@@ -345,7 +379,7 @@ class Event
         // PHP renders an empty array as [], which the edge reads as "not an
         // object" and records as a drop against an otherwise clean event.
         if (!empty($this->fields)) {
-            $envelope['attrs'] = $this->fields;
+            $envelope['attrs'] = self::boundedFields($this->fields);
         }
 
         return $envelope;
@@ -440,19 +474,46 @@ class Event
             $clean = (string)preg_replace('/[^\x20-\x7E]/', '', $value);
         }
 
+        if (strlen($clean) <= self::MAX_TEXT_BYTES) {
+            return $clean;
+        }
+
         // mb_strcut cuts on a byte budget while respecting codepoint
         // boundaries; mb_substr counts codepoints and would overshoot.
-        return function_exists('mb_strcut')
+        $cut = function_exists('mb_strcut')
             ? mb_strcut($clean, 0, self::MAX_TEXT_BYTES)
             : substr($clean, 0, self::MAX_TEXT_BYTES);
+
+        return self::dropSplitToken($cut);
+    }
+
+    /**
+     * Drop the partial word a clamp ended in.
+     *
+     * The deny assertion compares against the clamped value, so a credential
+     * straddling the byte budget would otherwise leave its first characters on
+     * the wire with nothing left for the literal-secret match to recognise.
+     * Kept as-is when the clamp contains no boundary at all: the value is then
+     * a single token, whose start the shape patterns already screen.
+     */
+    private static function dropSplitToken($cut)
+    {
+        // Control characters are already gone by here, so a space is the only
+        // separator left to cut back to.
+        $boundary = strrpos($cut, ' ');
+
+        return $boundary === false ? $cut : rtrim(substr($cut, 0, $boundary));
     }
 
     /**
      * Identifier-shaped values only; anything else is dropped, never mangled.
+     *
+     * The \z anchor is load-bearing: `$` also matches before a trailing
+     * newline, which would let "dbg_abc\n" through as an identifier.
      */
     public static function identifier($value)
     {
-        return preg_match('/^[A-Za-z0-9_.:-]{1,64}$/', (string)$value) ? (string)$value : '';
+        return preg_match('/^[A-Za-z0-9_.:-]{1,64}\z/D', (string)$value) ? (string)$value : '';
     }
 
     /**
@@ -599,28 +660,51 @@ class Event
     }
 
     /**
-     * Reduce PHP's fatal message to the part that is not already reported.
+     * Classify PHP's fatal message rather than quoting any of it.
      *
-     * An uncaught Error arrives with its whole trace inlined and every path
-     * absolute; left alone it spends the clamp on frames the `stack` field
-     * already carries, and puts the server's filesystem layout on the wire.
+     * error_get_last() prose carries whatever the dying statement held: the
+     * full SQL for a DB error, the connection user@host for a connect failure,
+     * and scalar argument values for a PHP 8 TypeError. Only the uncaught
+     * class name and a fixed category travel; `stack` still names file:line.
+     *
+     * @return array type and message, both module-authored.
      */
-    private static function fatalMessage($message)
+    private static function fatalSummary($message)
     {
-        $message = (string)$message;
-        $trace = strpos($message, 'Stack trace:');
+        if (preg_match('/^\s*Uncaught\s+([A-Za-z0-9_\\\\]+)\s*:/', $message, $matches)) {
+            $parts = explode('\\', $matches[1]);
+            $type = self::identifier((string)end($parts));
 
-        if ($trace !== false) {
-            $message = rtrim(substr($message, 0, $trace));
+            return array(
+                'type' => $type === '' ? 'FatalError' : $type,
+                'message' => 'uncaught_exception'
+            );
         }
 
-        foreach (self::roots() as $root) {
-            if ($root !== '') {
-                $message = str_replace($root, '', $message);
+        foreach (self::$fatal_categories as $prefix => $category) {
+            if (strpos($message, $prefix) === 0) {
+                return array('type' => 'FatalError', 'message' => $category);
             }
         }
 
-        return $message;
+        return array('type' => 'FatalError', 'message' => 'fatal_error');
+    }
+
+    /**
+     * The final attribute cap, applied to the wire shape rather than to one
+     * producer: failure() and apiFailure() both merge their own fields on top
+     * of an already-capped set, so cleanAttrs() alone cannot hold the bound.
+     * Sorted first because that is the order the edge itself keeps.
+     */
+    private static function boundedFields(array $fields)
+    {
+        if (count($fields) <= self::MAX_ATTRS) {
+            return $fields;
+        }
+
+        ksort($fields);
+
+        return array_slice($fields, 0, self::MAX_ATTRS, true);
     }
 
     private static function castFields(array $schema, array $values)

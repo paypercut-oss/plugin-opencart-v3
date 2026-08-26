@@ -104,7 +104,7 @@ so a settings save cannot lose it, and the storefront reads it for free.
 | `api.request_failed` | An API call answered 4xx/5xx, or never completed (`transport`) |
 | `api.request_slow` | An API call took 3s or more |
 | `api.response_unparsable` | A 200 whose body is not JSON; only its byte count travels |
-| `php.fatal` | A fatal that ended the request, from the shutdown handler |
+| `php.fatal` | A fatal that ended the request, from the shutdown handler; classified (`uncaught_exception` / `memory_exhausted` / `max_execution_time` / `fatal_error`), never quoted |
 
 Every failure carries `origin` (`paypercut` / `plugin` / `theme` / `core`) and,
 for an extension, `origin_plugin` — taken from the first stack frame outside our
@@ -133,21 +133,24 @@ The two places below must stay word-identical — the consent panel (the
 `upload/admin/language/en-gb/extension/payment/paypercut_telemetry.php`) and this
 section. `tests/run.php` fails the build if they drift.
 
-Module, OpenCart, PHP and theme versions; the extensions installed on this store
-and their versions; how this store has the Paypercut module configured (which
-checkout mode is selected and which options are switched on — never the values
-of your credentials); a record of each checkout, refund and payment notification
-the module handled and whether it succeeded, identified by OpenCart order id and
-Paypercut payment reference; when something fails, the error message, the file
-and line it came from, and which extension or theme raised it; and when the
-session started and stopped.
+Module, OpenCart, PHP and theme versions; the extensions installed on this
+store and their versions; how this store has the Paypercut module configured
+(which checkout mode is selected and which options are switched on — never the
+values of your credentials); a record of each checkout, refund and payment
+notification the module handled and whether it succeeded, identified by
+OpenCart order id and Paypercut payment reference; when something fails, the
+kind of error, a short description this module wrote for it, the file and line
+it came from, and which extension or theme raised it; and when the session
+started and stopped.
 
 **Not shared:** customer names, email addresses, billing or shipping addresses,
 order totals, line items, payment card data, the reason text you type when
-issuing a refund, or any API key, webhook secret or password.
+issuing a refund, the wording of errors raised by OpenCart or by another
+extension, or any API key, webhook secret or password.
 
 Your API key is never sent to the telemetry service. It is used once, over
-HTTPS, to obtain a short-lived diagnostic token from api.paypercut.io.
+HTTPS, to obtain a short-lived diagnostic token from the Paypercut API for the
+environment this store is connected to.
 
 Paypercut keeps this diagnostic data for 30 days.
 
@@ -155,15 +158,36 @@ Paypercut keeps this diagnostic data for 30 days.
 
 Card data (screened with a Luhn check on every value), credentials, refund
 reason text, customer names and addresses, order totals and line items, absolute
-filesystem paths, and the upstream API's own prose — the platform quotes
-submitted input back, so a rejected key arrives inside it and `api_code` /
-`trace_id` carry the diagnosis instead.
+filesystem paths, and any prose the module did not write itself.
+
+That last rule covers two sources. The upstream API quotes submitted input back,
+so a rejected key arrives inside its message; `api_code` / `api_param` /
+`trace_id` / `error.type` carry the diagnosis instead. OpenCart's own mysqli
+adapter puts the entire failing SQL into every database exception — and
+`username@hostname` into a connection failure — so `Event::failure()` never
+copies an exception's message either, and `Event::fatal()` classifies
+`error_get_last()` (`uncaught_exception`, `memory_exhausted`,
+`max_execution_time`, `fatal_error`) rather than quoting it. `->because()` is
+the one way a message reaches the wire, and it only ever carries text this
+module authored.
+
+`about()` shape-checks the two Paypercut ids with `Event::identifier()` rather
+than merely clamping them: the webhook route accepts an unsigned delivery
+whenever no webhook secret is configured, so `payment_id` and
+`payment_intent_id` are attacker-controlled on that path. `order_ref` is the
+merchant's own reference and keeps whatever format they use.
 
 The deny assertion in `EventQueue::append()` is the last gate. It drops the
 **whole event**, not the offending field: an event that trips it was assembled
-wrongly, so the rest of it cannot be trusted either. It screens `attrs` and
-`error` (including `error.stack`, two levels down) against denied key names,
-denied value shapes, a Luhn PAN check and the store's actual credentials.
+wrongly, so the rest of it cannot be trusted either. It screens the **entire
+serialised envelope** — `attrs`, `error` (including `error.stack`, two levels
+down), and the top-level `order_ref` / `payment_id` / `payment_intent_id`
+correlation fields, whose values arrive from an unauthenticated request body on
+the webhook path — against denied key names, denied value shapes, a Luhn PAN
+check and the store's actual credentials. Screening the envelope itself rather
+than a named subset is deliberate: a field added to the wire shape later is
+covered without anyone remembering to list it, and `tests/run.php` poisons every
+leaf of a fully populated envelope to keep it that way.
 
 The admin user who started a session is kept in the local record for the banner
 but is deliberately absent from `session.started`: a store-user identifier is not
@@ -173,7 +197,15 @@ covered by the disclosure above.
 
 Events are delivered only from authenticated admin requests: the panel's status
 poll (every ~60s while the screen is open), the Stop button, and the settings
-page render as a backstop. A storefront request does exactly two things — read
+page render as a backstop.
+
+The three endpoints the panel calls are `extension/payment/paypercut/`
+`telemetryStart`, `telemetryStop` and `telemetryStatus`. They are thin
+delegations to `paypercut_telemetry`, and they have to live on the `paypercut`
+controller: OpenCart 3 derives the permission route from the third path segment
+(`admin/controller/startup/permission.php`), and installing the extension grants
+`extension/payment/paypercut` only — an action on any other controller answers
+the panel's AJAX with the permission page instead of JSON. A storefront request does exactly two things — read
 the "is a session live" setting, and, if it is, make one buffered queue write at
 shutdown.
 

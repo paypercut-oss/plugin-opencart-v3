@@ -26,10 +26,10 @@ $_['text_telemetry_manage'] = 'Manage it';
 
 // Consent
 $_['text_telemetry_shared_summary'] = 'What is shared';
-$_['text_telemetry_shared'] = 'Module, OpenCart, PHP and theme versions; the extensions installed on this store and their versions; how this store has the Paypercut module configured (which checkout mode is selected and which options are switched on — never the values of your credentials); a record of each checkout, refund and payment notification the module handled and whether it succeeded, identified by OpenCart order id and Paypercut payment reference; when something fails, the error message, the file and line it came from, and which extension or theme raised it; and when the session started and stopped.';
+$_['text_telemetry_shared'] = 'Module, OpenCart, PHP and theme versions; the extensions installed on this store and their versions; how this store has the Paypercut module configured (which checkout mode is selected and which options are switched on — never the values of your credentials); a record of each checkout, refund and payment notification the module handled and whether it succeeded, identified by OpenCart order id and Paypercut payment reference; when something fails, the kind of error, a short description this module wrote for it, the file and line it came from, and which extension or theme raised it; and when the session started and stopped.';
 $_['text_telemetry_not_shared_label'] = 'Not shared:';
-$_['text_telemetry_not_shared'] = 'customer names, email addresses, billing or shipping addresses, order totals, line items, payment card data, the reason text you type when issuing a refund, or any API key, webhook secret or password.';
-$_['text_telemetry_key_use'] = 'Your API key is never sent to the telemetry service. It is used once, over HTTPS, to obtain a short-lived diagnostic token from api.paypercut.io.';
+$_['text_telemetry_not_shared'] = 'customer names, email addresses, billing or shipping addresses, order totals, line items, payment card data, the reason text you type when issuing a refund, the wording of errors raised by OpenCart or by another extension, or any API key, webhook secret or password.';
+$_['text_telemetry_key_use'] = 'Your API key is never sent to the telemetry service. It is used once, over HTTPS, to obtain a short-lived diagnostic token from the Paypercut API for the environment this store is connected to.';
 $_['text_telemetry_retention'] = 'Paypercut keeps this diagnostic data for 30 days.';
 $_['text_telemetry_modal_title'] = 'Start a debug session?';
 $_['text_telemetry_modal_lead'] = 'While the session is running, this store sends the diagnostic information below to Paypercut so support can see what is happening.';

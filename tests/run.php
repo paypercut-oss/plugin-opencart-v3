@@ -82,6 +82,13 @@ same('allowed base: rejects prefixed host', '', Environment::allowedPaypercutBas
 same('allowed base: rejects extra tld', '', Environment::allowedPaypercutBase('https://paypercut.io.co/'));
 same('allowed base: accepts subdomain', 'https://telemetry.dev.paypercut.net/', Environment::allowedPaypercutBase('https://telemetry.dev.paypercut.net'));
 
+// The order screen links a merchant straight at a payment record, so it has to
+// follow the environment the payment was made in.
+same('dashboard base: dev', 'https://dashboard.dev.paypercut.net/', Environment::dashboardBaseUri('dev'));
+same('dashboard base: stage', 'https://dashboard.stage.paypercut.net/', Environment::dashboardBaseUri('stage'));
+same('dashboard base: production', 'https://dashboard.paypercut.io/', Environment::dashboardBaseUri('production'));
+same('dashboard base: unknown falls back to production', 'https://dashboard.paypercut.io/', Environment::dashboardBaseUri('nonsense'));
+
 // --- The deny assertion -----------------------------------------------------
 
 $denied_keys = array('api_client_secret', 'telemetry_token', 'api_key', 'nonce', 'authorization', 'webhook_secret', 'password', 'credential');
@@ -134,6 +141,112 @@ check(
     Event::isDenied(array('error' => array('stack' => array('boom ppc_live_key'))))
 );
 
+// --- The gate screens the envelope, not a named subset of it ----------------
+
+/**
+ * One copy of $envelope per leaf, with $poison substituted at that leaf.
+ *
+ * Walking the envelope rather than a list of field names is the point: a field
+ * added to the wire shape later is poisoned here without anyone updating this
+ * file, so it cannot ship unscreened.
+ */
+function poisonLeaves($value, $poison, $path = '')
+{
+    if (!is_array($value)) {
+        return array(array('path' => $path, 'value' => $poison));
+    }
+
+    $cases = array();
+
+    foreach ($value as $key => $child) {
+        $child_path = $path === '' ? (string)$key : $path . '.' . $key;
+
+        foreach (poisonLeaves($child, $poison, $child_path) as $leaf) {
+            $copy = $value;
+            $copy[$key] = $leaf['value'];
+
+            $cases[] = array('path' => $leaf['path'], 'value' => $copy);
+        }
+    }
+
+    return $cases;
+}
+
+function throwingCall()
+{
+    throw new RuntimeException('order lookup returned nothing');
+}
+
+try {
+    throwingCall();
+} catch (Exception $thrown) {
+    // Caught so the envelope below carries a real stack.
+}
+
+// Every field a producer can populate, in one envelope.
+$populated = Event::failure(
+    'webhook.unresolved',
+    'order_not_found',
+    array('webhook' => 'payment_intent.succeeded', 'http_status' => 404),
+    $thrown
+)
+    ->about(
+        array(
+            'order_ref' => 'OC-42',
+            'payment_id' => 'pay_1',
+            'payment_intent_id' => 'pi_1'
+        )
+    )
+    ->because('no order carried this payment intent')
+    ->envelope(0);
+
+$store_secrets = array('sk_live_STORE_KEY', 'a-store-secret-in-no-known-format');
+
+check('the fully populated envelope is itself clean', !EventQueue::screen($populated, $store_secrets));
+
+$reached = array();
+
+foreach (poisonLeaves($populated, 'placeholder') as $case) {
+    $reached[] = $case['path'];
+}
+
+// The correlation fields are the ones the reviewer proved were never screened;
+// an unauthenticated webhook body reaches payment_id at six call sites.
+foreach (array('event', 'occurred_at', 'order_ref', 'payment_id', 'payment_intent_id', 'error.code', 'error.type', 'error.message', 'error.stack.0', 'attrs.webhook') as $field) {
+    check('the screening walk reaches ' . $field, in_array($field, $reached, true));
+}
+
+// Widening the screen must not start dropping ordinary traffic: real Paypercut
+// identifiers and a merchant's own order reference format have to survive it.
+$real_ids = array(
+    array('order_ref' => 'OC-2026/8891', 'payment_id' => 'pay_9RTvK2', 'payment_intent_id' => 'pi_9RTvK2'),
+    array('order_ref' => '178', 'payment_id' => 'cs_apm_123', 'payment_intent_id' => 'pm_123')
+);
+
+foreach ($real_ids as $index => $ids) {
+    check(
+        'ordinary correlation ids still pass the widened screen (' . $index . ')',
+        !EventQueue::screen(Event::of('payment.succeeded')->about($ids)->envelope(0), $store_secrets)
+    );
+}
+
+$poisons = array(
+    'pan' => '4111111111111111',
+    'pan in prose' => 'card 4111 1111 1111 1111 declined',
+    'paypercut key shape' => 'ppc_live_ABCDEF',
+    'literal store api key' => 'sk_live_STORE_KEY',
+    'literal store secret of unknown shape' => 'a-store-secret-in-no-known-format'
+);
+
+foreach ($poisons as $label => $poison) {
+    foreach (poisonLeaves($populated, $poison) as $case) {
+        check(
+            'the gate screens ' . $case['path'] . ' for a ' . $label,
+            EventQueue::screen($case['value'], $store_secrets)
+        );
+    }
+}
+
 // --- Named constructors are the boundary ------------------------------------
 
 $snapshot = Event::environmentSnapshot(
@@ -185,6 +298,49 @@ check(
     !Event::isDenied(array('attrs' => $envelope['attrs'], 'error' => $envelope['error']))
 );
 
+// --- Platform prose never reaches the wire ----------------------------------
+
+// OpenCart 3's mysqli adapter puts these on every exception it raises: the full
+// SQL for a query error, and the credentials host for a connection failure.
+$db_connect_error = new Exception('Error: Could not make a database link using ocuser@db-prod.merchant.internal!');
+$db_query_error = new Exception("Error: Duplicate entry<br />Error No: 1062<br />INSERT INTO oc_order_history SET comment = 'Reason: customer changed their mind'");
+
+foreach (array('connection' => $db_connect_error, 'query' => $db_query_error) as $label => $thrown_db) {
+    $db_envelope = Event::failure('refund.failed', 'transport', array('has_reason' => true), $thrown_db)->envelope(0);
+    $serialised = json_encode($db_envelope);
+
+    check('failure() drops the platform message (' . $label . ')', !isset($db_envelope['error']['message']));
+    same('failure() keeps the exception type (' . $label . ')', 'Exception', $db_envelope['error']['type']);
+    check('no database credentials on the wire (' . $label . ')', strpos($serialised, 'ocuser@db-prod') === false);
+    check('no SQL on the wire (' . $label . ')', strpos($serialised, 'INSERT INTO') === false);
+    check('no refund reason text on the wire (' . $label . ')', strpos($serialised, 'changed their mind') === false);
+}
+
+// error_get_last() prose is the same exposure without a catch block: an uncaught
+// DB exception arrives with the whole failing statement inlined.
+$fatal = Event::fatal(
+    "Uncaught PDOException: SQLSTATE[23000] in /home/merchant/public_html/x.php:9\nINSERT INTO oc_paypercut_webhook_log SET payload = '{\"card\":\"4111111111111111\"}'",
+    '/home/merchant/public_html/x.php',
+    9,
+    E_ERROR
+)->envelope(0);
+
+same('fatal() classifies rather than quotes', 'uncaught_exception', $fatal['error']['message']);
+same('fatal() keeps the uncaught class', 'PDOException', $fatal['error']['type']);
+check('fatal() ships no payload', strpos(json_encode($fatal), '4111111111111111') === false);
+
+same(
+    'fatal() categorises a memory exhaustion',
+    'memory_exhausted',
+    Event::fatal('Allowed memory size of 134217728 bytes exhausted (tried to allocate 20480 bytes)', '/x.php', 1, E_ERROR)->envelope(0)['error']['message']
+);
+
+same(
+    'fatal() falls back to a fixed category',
+    'fatal_error',
+    Event::fatal('Call to a member function query() on null', '/x.php', 1, E_ERROR)->envelope(0)['error']['message']
+);
+
 // --- Bounding ---------------------------------------------------------------
 
 same('text preserves UTF-8', 'Θέμα Ελλάδα', Event::text('Θέμα Ελλάδα'));
@@ -212,6 +368,33 @@ for ($i = 0; $i < 40; $i++) {
 
 check('attrs are capped', count(Event::of('test.event', $wide)->fields()) === Event::MAX_ATTRS);
 
+// cleanAttrs() alone cannot hold the bound: failure() merges origin fields and
+// apiFailure() adds four more on top of an already-capped set.
+$full_attrs = array();
+
+for ($i = 0; $i < Event::MAX_ATTRS; $i++) {
+    $full_attrs['attr_' . $i] = $i;
+}
+
+$merged = Event::apiFailure(
+    'api.request_failed',
+    401,
+    array('trace_id' => 'da74bc', 'error' => array('code' => 'token_invalid', 'param' => 'api_key_id')),
+    $full_attrs
+)->envelope(0);
+
+check('the cap holds after the api-failure merge', count($merged['attrs']) === Event::MAX_ATTRS);
+
+same('identifier rejects a trailing newline', '', Event::identifier("dbg_abc\n"));
+
+// The deny assertion compares against the clamped value, so a credential
+// straddling the byte budget must not leave its first characters behind.
+$split_secret = str_repeat('a', 250) . ' zzzzstoresecretvalue';
+$clamped = Event::text($split_secret);
+
+same('the clamp cuts back to a boundary', str_repeat('a', 250), $clamped);
+check('no fragment of the split token survives', strpos($clamped, 'zzzz') === false);
+
 $empty = Event::of('test.event')->envelope(0);
 check('empty attrs are omitted', !isset($empty['attrs']));
 same('occurred_at is an RFC3339 string', '1970-01-01T00:00:00Z', $empty['occurred_at']);
@@ -219,6 +402,20 @@ same('occurred_at is an RFC3339 string', '1970-01-01T00:00:00Z', $empty['occurre
 $correlated = Event::of('test.event')->about(array('order_ref' => 'OC-42', 'payment_id' => 'pay_1'))->envelope(0);
 same('correlation sits outside attrs', 'OC-42', $correlated['order_ref']);
 check('correlation drops undeclared keys', !isset($correlated['checkout_id']));
+
+// The webhook route accepts an unsigned delivery when no secret is configured,
+// so the id it carries is attacker-controlled until it is shape-checked.
+$hostile = Event::of('webhook.unresolved')->about(
+    array(
+        'payment_id' => 'card 4111 1111 1111 1111 declined',
+        'payment_intent_id' => "pi_1\nSet-Cookie: x",
+        'order_ref' => 'OC-42'
+    )
+)->envelope(0);
+
+check('a payment id that is not identifier-shaped is dropped', !isset($hostile['payment_id']));
+check('a payment intent id carrying a newline is dropped', !isset($hostile['payment_intent_id']));
+same('the merchant order reference keeps its own format', 'OC-42', $hostile['order_ref']);
 
 // --- The flusher's decision table -------------------------------------------
 
@@ -348,6 +545,48 @@ check('the rendered log block is addressable', strpos($panel_source, 'data-paype
 // session's heading.
 preg_match('/if \(started\) \{(.*?)\}/s', $panel_source, $started_branch);
 check('the client drops the stale log on start', isset($started_branch[1]) && strpos($started_branch[1], 'dropSentLog()') !== false);
+
+// --- Structural guards no unit test can reach -------------------------------
+
+$queue_source = file_get_contents($root . '/upload/system/library/paypercut/telemetry/eventqueue.php');
+$flusher_source = file_get_contents($root . '/upload/system/library/paypercut/telemetry/flusher.php');
+$admin_source = file_get_contents($root . '/upload/admin/controller/extension/payment/paypercut.php');
+$telemetry_source = file_get_contents($root . '/upload/admin/controller/extension/payment/paypercut_telemetry.php');
+
+check(
+    'the gate never screens a named subset again',
+    strpos($queue_source, "array('attrs', 'error')") === false
+);
+
+check(
+    'append refuses to rebuild the queue after teardown',
+    strpos($queue_source, '!TelemetrySession::isActiveFast()') !== false
+);
+
+check(
+    'the stored edge base is re-validated before a token is sent to it',
+    strpos($flusher_source, 'Environment::allowedPaypercutBase(') !== false
+);
+
+// OpenCart resolves the permission route from the third path segment, and only
+// `extension/payment/paypercut` is granted at install — an action on any other
+// controller answers the panel's AJAX with the permission page.
+foreach (array('telemetryStart', 'telemetryStop', 'telemetryStatus') as $action) {
+    check('the permitted controller exposes ' . $action, strpos($admin_source, 'public function ' . $action . '(') !== false);
+    check('the panel links the permitted route for ' . $action, strpos($telemetry_source, "'extension/payment/paypercut/" . $action . "'") !== false);
+}
+
+foreach (array('start', 'stop', 'status') as $action) {
+    check(
+        'the panel no longer links the unpermitted route for ' . $action,
+        strpos($telemetry_source, "'extension/payment/paypercut_telemetry/" . $action . "'") === false
+    );
+}
+
+// Twig runs with autoescape off in OpenCart 3, so every value in the panel is a
+// raw sink until it is filtered.
+preg_match_all('/\{\{\s*(session_id|trace_id|message|started_by_name)\s*\}\}/', $panel_source, $unescaped);
+check('no unescaped panel value', empty($unescaped[0]));
 
 // --- Result -----------------------------------------------------------------
 
