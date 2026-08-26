@@ -32,6 +32,7 @@
             <li><a href="#tab-payment" data-toggle="tab"><i class="fa fa-credit-card"></i> Payment Settings</a></li>
             <li><a href="#tab-webhooks" data-toggle="tab"><i class="fa fa-bell"></i> Webhooks</a></li>
             <li><a href="#tab-general" data-toggle="tab"><i class="fa fa-cog"></i> General</a></li>
+            <li><a href="#tab-debug" data-toggle="tab"><i class="fa fa-bug"></i> {{ text_telemetry_tab }}</a></li>
           </ul>
           
           <div class="tab-content">
@@ -68,6 +69,22 @@
               {% if error_api_key %}
               <div class="text-danger">{{ error_api_key }}</div>
               {% endif %}
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="col-sm-2 control-label" for="input-environment">
+              {{ entry_environment }}
+              <span data-toggle="tooltip" title="{{ help_environment }}" data-placement="right">
+                <i class="fa fa-question-circle"></i>
+              </span>
+            </label>
+            <div class="col-sm-10">
+              <select name="payment_paypercut_environment" id="input-environment" class="form-control">
+                {% for environment in environment_choices %}
+                <option value="{{ environment.value }}"{% if payment_paypercut_environment == environment.value %} selected="selected"{% endif %}>{{ environment.label }}</option>
+                {% endfor %}
+              </select>
+              <span class="help-block"><i class="fa fa-info-circle"></i> {{ help_environment }}</span>
             </div>
           </div>
           {% if payment_method_configs %}
@@ -361,6 +378,13 @@
               </div>
             </div>
             
+            <!-- Debug Session Tab -->
+            <div class="tab-pane" id="tab-debug">
+              <div style="padding: 15px 0;">
+                {{ telemetry_panel }}
+              </div>
+            </div>
+
           </div><!-- /.tab-content -->
         </form>
       </div>
@@ -400,7 +424,7 @@ function testApiConnection() {
     $.ajax({
         url: 'index.php?route=extension/payment/paypercut/testConnection&user_token={{ user_token }}',
         type: 'post',
-        data: { api_key: apiKey },
+        data: { api_key: apiKey, payment_paypercut_environment: $('#input-environment').val() },
         dataType: 'json',
         success: function(json) {
             if (json.error) {

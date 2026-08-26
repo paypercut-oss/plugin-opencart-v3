@@ -1,7 +1,39 @@
 <?php
+
+use Paypercut\Support\Environment;
+use Paypercut\Telemetry\Bootstrap;
+use Paypercut\Telemetry\Event;
+use Paypercut\Telemetry\EventRecorder;
+use Paypercut\Telemetry\Store;
+use Paypercut\Telemetry\TelemetrySession;
+
 class ControllerExtensionPaymentPaypercut extends Controller
 {
     private $error = array();
+
+    public function __construct($registry)
+    {
+        parent::__construct($registry);
+
+        require_once DIR_SYSTEM . 'library/paypercut/bootstrap.php';
+
+        Bootstrap::boot($registry);
+    }
+
+    /**
+     * Resolve a Paypercut API endpoint for the store's chosen environment.
+     *
+     * The posted value wins while the settings form is being saved, so Test
+     * Connection and domain registration use the environment being chosen.
+     */
+    private function apiUrl($path)
+    {
+        $environment = isset($this->request->post['payment_paypercut_environment'])
+            ? $this->request->post['payment_paypercut_environment']
+            : $this->config->get('payment_paypercut_environment');
+
+        return Environment::apiBaseUri((string)$environment) . $path;
+    }
 
     // Apple Pay domain verification file — see https://docs.paypercut.io/docs/accept-payments/apple-pay
     // Bundled at upload/system/library/paypercut/applepay/apple-developer-merchantid-domain-association.
@@ -16,6 +48,8 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
         if (($this->request->server['REQUEST_METHOD'] == 'POST') && $this->validate()) {
             $this->model_setting_setting->editSetting('payment_paypercut', $this->request->post);
+
+            $this->afterSettingsSaved();
 
             $this->session->data['success'] = $this->language->get('text_success');
 
@@ -92,6 +126,22 @@ class ControllerExtensionPaymentPaypercut extends Controller
             $data['payment_paypercut_checkout_mode'] = $this->config->get('payment_paypercut_checkout_mode') ?: 'hosted';
         }
 
+        // Connection environment
+        if (isset($this->request->post['payment_paypercut_environment'])) {
+            $data['payment_paypercut_environment'] = $this->request->post['payment_paypercut_environment'];
+        } else {
+            $data['payment_paypercut_environment'] = Environment::normalize($this->config->get('payment_paypercut_environment'));
+        }
+
+        $data['environment_choices'] = array();
+
+        foreach (Environment::choices() as $environment) {
+            $data['environment_choices'][] = array(
+                'value' => $environment,
+                'label' => $this->language->get('text_environment_' . $environment)
+            );
+        }
+
         // Webhook URL
         $data['payment_paypercut_webhook_url'] = HTTPS_CATALOG . 'index.php?route=extension/payment/paypercut/webhook';
 
@@ -166,7 +216,62 @@ class ControllerExtensionPaymentPaypercut extends Controller
         // Add user token for AJAX requests
         $data['user_token'] = $this->session->data['user_token'];
 
+        $data['telemetry_panel'] = $this->load->controller('extension/payment/paypercut_telemetry/panel');
+
+        // Language strings the template reads directly.
+        $data = array_merge($this->language->all(), $data);
+
         $this->response->setOutput($this->load->view('extension/payment/paypercut', $data));
+    }
+
+    /**
+     * Follow a settings save through: the record may now describe a connection
+     * the store no longer has, and a live session's configuration snapshot is
+     * out of date the moment a setting changes.
+     */
+    private function afterSettingsSaved()
+    {
+        // The request's config was loaded before the save, so the snapshot
+        // below would otherwise describe the settings the merchant replaced.
+        foreach ($this->request->post as $key => $value) {
+            if (strpos($key, 'payment_paypercut_') === 0) {
+                $this->config->set($key, $value);
+            }
+        }
+
+        EventRecorder::record(
+            Event::of(
+                'connection.validated',
+                array(
+                    'source' => 'settings_save',
+                    'is_bnpl' => false,
+                    'environment' => (string)$this->config->get('payment_paypercut_environment')
+                )
+            )
+        );
+
+        // A session opened with one configuration snapshot; without this, a
+        // setting changed mid-session is read against the snapshot taken before
+        // it and the timeline lies.
+        TelemetrySession::flushMemo();
+        TelemetrySession::reap();
+
+        if (TelemetrySession::isActiveFast()) {
+            Bootstrap::loadAdmin();
+
+            EventRecorder::record(Event::environmentConfiguration(\Paypercut\Telemetry\EnvironmentSnapshot::values()));
+        }
+    }
+
+    /**
+     * The environment this request is acting on: the posted one while the form
+     * is being saved, the stored one otherwise.
+     */
+    private function environmentForRequest()
+    {
+        return isset($this->request->post['payment_paypercut_environment'])
+            ? $this->request->post['payment_paypercut_environment']
+            : (string)$this->config->get('payment_paypercut_environment');
     }
 
     protected function validate()
@@ -307,7 +412,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
     private function getWebhook($webhook_id)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/webhooks/' . $webhook_id;
+        $api_url = $this->apiUrl('v1/webhooks/' . $webhook_id);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -333,7 +438,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
     private function findWebhookByUrl($webhook_url)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/webhooks';
+        $api_url = $this->apiUrl('v1/webhooks');
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -358,6 +463,10 @@ class ControllerExtensionPaymentPaypercut extends Controller
                     }
                 }
             }
+        } else {
+            EventRecorder::record(
+                Event::failure('settings.webhooks_unreadable', 'lookup_failed', array('http_status' => (int)$http_code))
+            );
         }
 
         return null;
@@ -384,8 +493,12 @@ class ControllerExtensionPaymentPaypercut extends Controller
                 if ($existing) {
                     $json['error'] = 'Webhook already exists for this URL';
                     $json['webhook_id'] = $existing['id'];
+
+                    EventRecorder::record(
+                        Event::failure('connection.webhook_registration_failed', 'already_exists', array('source' => 'settings'))
+                    );
                 } else {
-                    $api_url = 'https://api.paypercut.io/v1/webhooks';
+                    $api_url = $this->apiUrl('v1/webhooks');
 
                     // Create webhook with checkout_session.completed event enabled
                     $payload = array(
@@ -420,9 +533,18 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
                         $json['success'] = 'Webhook created successfully';
                         $json['webhook_id'] = $result['id'];
+
+                        EventRecorder::record(Event::of('webhook.registered'));
+                        EventRecorder::record(Event::of('connection.webhook_registered', array('source' => 'settings')));
                     } else {
                         $error_data = json_decode($response, true);
                         $json['error'] = isset($error_data['message']) ? $error_data['message'] : 'Failed to create webhook';
+
+                        // The API quotes submitted input back, so only the
+                        // status travels, never its prose.
+                        EventRecorder::record(
+                            Event::apiFailure('webhook.registration_failed', $http_code, is_array($error_data) ? $error_data : array())
+                        );
                     }
                 }
             }
@@ -447,7 +569,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
                 $json['error'] = 'No webhook configured';
             } else {
                 $api_key = $this->config->get('payment_paypercut_api_key');
-                $api_url = 'https://api.paypercut.io/v1/webhooks/' . $webhook_id;
+                $api_url = $this->apiUrl('v1/webhooks/' . $webhook_id);
 
                 $ch = curl_init();
                 curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -471,8 +593,14 @@ class ControllerExtensionPaymentPaypercut extends Controller
                     $this->model_setting_setting->editSetting('payment_paypercut', $settings);
 
                     $json['success'] = 'Webhook deleted successfully';
+
+                    EventRecorder::record(Event::of('webhook.deleted'));
                 } else {
                     $json['error'] = 'Failed to delete webhook';
+
+                    EventRecorder::record(
+                        Event::failure('webhook.delete_failed', 'rejected', array('http_status' => (int)$http_code))
+                    );
                 }
             }
         }
@@ -537,7 +665,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
     private function getPaymentMethodDomain($domain_name)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/payment_method_domains';
+        $api_url = $this->apiUrl('v1/payment_method_domains');
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -560,6 +688,10 @@ class ControllerExtensionPaymentPaypercut extends Controller
                     }
                 }
             }
+        } else {
+            EventRecorder::record(
+                Event::failure('settings.payment_domains_unreadable', 'lookup_failed', array('http_status' => (int)$http_code))
+            );
         }
 
         return null;
@@ -571,7 +703,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
     private function registerPaymentMethodDomain($domain_name)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/payment_method_domains';
+        $api_url = $this->apiUrl('v1/payment_method_domains');
 
         $payload = array(
             'domain_name' => $domain_name
@@ -600,6 +732,9 @@ class ControllerExtensionPaymentPaypercut extends Controller
             $settings['payment_paypercut_domain_id'] = $result['id'];
             $this->model_setting_setting->editSetting('payment_paypercut', $settings);
 
+            EventRecorder::record(Event::of('payment_domain.registered'));
+            EventRecorder::record(Event::of('connection.payment_domain_registered', array('source' => 'settings_save')));
+
             return array(
                 'success' => true,
                 'message' => 'Domain registered successfully. Verification may be required.',
@@ -625,6 +760,13 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
             // Log the error for debugging
             $this->log->write('Paypercut domain registration failed: HTTP ' . $http_code . ' - ' . $error_message . ' | Response: ' . $response);
+
+            EventRecorder::record(
+                Event::apiFailure('payment_domain.registration_failed', $http_code, is_array($error_data) ? $error_data : array())
+            );
+            EventRecorder::record(
+                Event::failure('connection.payment_domain_registration_failed', 'rejected', array('source' => 'settings_save', 'http_status' => (int)$http_code))
+            );
 
             return array(
                 'success' => false,
@@ -653,7 +795,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
             }
 
             // Test connection by verifying account
-            $api_url = 'https://api.paypercut.io/v1/account';
+            $api_url = $this->apiUrl('v1/account');
 
             $ch = curl_init();
 
@@ -688,6 +830,18 @@ class ControllerExtensionPaymentPaypercut extends Controller
                 // Detect mode using the detectApiKeyMode function
                 $mode = $this->detectApiKeyMode($api_key);
 
+                EventRecorder::record(
+                    Event::of(
+                        'connection.tested',
+                        array(
+                            'is_bnpl' => false,
+                            'ok' => true,
+                            'environment' => (string)$this->environmentForRequest(),
+                            'api_key_mode' => (string)$mode
+                        )
+                    )
+                );
+
                 $json['success'] = true;
                 $json['message'] = 'Connection successful!';
                 $json['mode'] = $mode;
@@ -696,6 +850,14 @@ class ControllerExtensionPaymentPaypercut extends Controller
                 }
             } elseif ($http_code == 401) {
                 $json['error'] = 'Authentication failed. Please check your API key.';
+
+                EventRecorder::record(
+                    Event::failure(
+                        'connection.tested',
+                        'credentials_rejected',
+                        array('is_bnpl' => false, 'ok' => false, 'http_status' => 401)
+                    )
+                );
             } elseif ($http_code == 0) {
                 $json['error'] = 'Cannot connect to Paypercut API. Check your server\'s internet connection and SSL certificates.';
             } else {
@@ -704,6 +866,13 @@ class ControllerExtensionPaymentPaypercut extends Controller
             }
         } catch (Exception $e) {
             $json['error'] = 'Exception: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine();
+
+            // A rejected credential is quoted back in the message but never in
+            // the class, so only the type travels.
+            EventRecorder::record(
+                Event::failure('connection.validation_failed', 'credentials_rejected', array('source' => 'test_connection', 'is_bnpl' => false))
+                    ->because('validation threw ' . Event::shortClassName($e))
+            );
         }
 
         $this->response->addHeader('Content-Type: application/json');
@@ -721,7 +890,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
             return array();
         }
 
-        $api_url = 'https://api.paypercut.io/v1/payment-configs';
+        $api_url = $this->apiUrl('v1/payment-configs');
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -933,12 +1102,23 @@ class ControllerExtensionPaymentPaypercut extends Controller
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
         ");
 
+        // Telemetry storage: the token, queue, inflight batch, runtime counters,
+        // locks and sent log all live in this one table.
+        Store::ensureSchema();
+
         // Register event for order info page to display Paypercut payment information
         $this->load->model('setting/event');
         $this->model_setting_event->addEvent(
             'paypercut_order_info',
             'admin/view/sale/order_info/after',
             'extension/payment/paypercut_order/info'
+        );
+
+        // Every admin page shows a banner while a debug session is running.
+        $this->model_setting_event->addEvent(
+            'paypercut_telemetry_notice',
+            'admin/view/common/header/after',
+            'extension/payment/paypercut_telemetry/notice'
         );
 
         // Deploy the Apple Pay domain verification file to <webroot>/.well-known/.
@@ -956,9 +1136,17 @@ class ControllerExtensionPaymentPaypercut extends Controller
      */
     public function uninstall()
     {
-        // Remove event
+        // The single teardown path, so nothing is forgotten: this deletes the
+        // token, the queue, the inflight batch and the runtime record.
+        TelemetrySession::end('deactivated');
+
+        // Then the rest of the telemetry storage: both locks and the sent log.
+        Store::purge();
+
+        // Remove events
         $this->load->model('setting/event');
         $this->model_setting_event->deleteEventByCode('paypercut_order_info');
+        $this->model_setting_event->deleteEventByCode('paypercut_telemetry_notice');
 
         // Note: We intentionally don't drop database tables to preserve transaction history
         // If you want to completely remove all data, manually drop these tables:
