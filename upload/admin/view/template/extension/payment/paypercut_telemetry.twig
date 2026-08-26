@@ -1,0 +1,482 @@
+<div id="paypercut-debug-session" class="paypercut-debug-session">
+  <div id="paypercut-debug-session-status" class="alert" role="status" aria-live="polite" style="display: none;"></div>
+
+  <div data-paypercut-state="idle"{% if state != 'idle' %} style="display: none;"{% endif %}>
+    <p><strong>{{ text_telemetry_idle_lead }}</strong></p>
+    <p class="help-block">{{ text_telemetry_idle_help }}</p>
+    <details style="margin-bottom: 15px;">
+      <summary>{{ text_telemetry_shared_summary }}</summary>
+      <p style="margin-top: 10px;">{{ text_telemetry_shared }}</p>
+      <p><strong>{{ text_telemetry_not_shared_label }}</strong> {{ text_telemetry_not_shared }}</p>
+      <p>{{ text_telemetry_key_use }}</p>
+      <p>{{ text_telemetry_retention }}</p>
+    </details>
+    <button type="button" class="btn btn-primary paypercut-debug-session-start">
+      <i class="fa fa-bug"></i> {{ button_telemetry_start }}
+    </button>
+  </div>
+
+  <div data-paypercut-state="running"{% if state != 'running' %} style="display: none;"{% endif %}>
+    <p>
+      <span class="label label-success"><i class="fa fa-circle"></i></span>
+      <strong>{{ text_telemetry_running|format('<span data-paypercut-countdown>—</span>')|raw }}</strong>
+    </p>
+    <p class="help-block" data-paypercut-meta>
+      {{ text_telemetry_started_by|format('<span data-paypercut-started-by>' ~ started_by_name|escape ~ '</span>', '<span data-paypercut-ends-at>' ~ ends_at ~ '</span>')|raw }}
+    </p>
+    <p>
+      {{ text_telemetry_session_id }}
+      <code data-paypercut-session-id>{{ session_id|escape }}</code>
+      <button type="button" class="btn btn-link btn-xs" data-paypercut-copy>{{ button_telemetry_copy }}</button>
+    </p>
+    <p class="help-block">
+      {{ text_telemetry_counters|format('<span data-paypercut-sent>' ~ events_sent ~ '</span>', '<span data-paypercut-dropped>' ~ events_dropped ~ '</span>')|raw }}
+    </p>
+    <button type="button" class="btn btn-danger paypercut-debug-session-stop">
+      <i class="fa fa-stop"></i> {{ button_telemetry_stop }}
+    </button>
+  </div>
+
+  <div data-paypercut-state="ended"{% if state != 'ended' %} style="display: none;"{% endif %}>
+    <p><strong>{{ text_telemetry_ended_lead }}</strong> {{ text_telemetry_ended_help }}</p>
+    <p>
+      {{ text_telemetry_last_session_id }}
+      <code data-paypercut-session-id>{{ session_id }}</code>
+      <button type="button" class="btn btn-link btn-xs" data-paypercut-copy>{{ button_telemetry_copy }}</button>
+      <span class="help-block">{{ text_telemetry_quote_it }}</span>
+    </p>
+    <button type="button" class="btn btn-primary paypercut-debug-session-start">
+      <i class="fa fa-bug"></i> {{ button_telemetry_start }}
+    </button>
+  </div>
+
+  <div data-paypercut-state="failed"{% if state != 'failed' %} style="display: none;"{% endif %}>
+    <div class="alert alert-danger">
+      <i class="fa fa-exclamation-circle"></i> <span data-paypercut-failed-message>{{ message|escape }}</span>
+    </div>
+    <p data-paypercut-reference{% if trace_id == '' %} style="display: none;"{% endif %}>
+      {{ text_telemetry_support_reference }}
+      <code data-paypercut-trace-id>{{ trace_id|escape }}</code>
+      <button type="button" class="btn btn-link btn-xs" data-paypercut-copy>{{ button_telemetry_copy }}</button>
+    </p>
+    <button type="button" class="btn btn-primary paypercut-debug-session-start">
+      <i class="fa fa-refresh"></i> {{ button_telemetry_retry }}
+    </button>
+  </div>
+
+  {% if log_count %}
+  <details data-paypercut-log style="margin-top: 20px;">
+    <summary>{{ text_telemetry_log_summary|format(log_count) }}</summary>
+    <p class="help-block" style="margin-top: 10px;">{{ text_telemetry_log_help|format(log_max_entries) }}</p>
+    <div style="max-height: 320px; overflow: auto;">
+      <table class="table table-condensed table-striped">
+        <thead>
+          <tr>
+            <th>{{ text_telemetry_log_time }}</th>
+            <th>{{ text_telemetry_log_event }}</th>
+            <th>{{ text_telemetry_log_detail }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in log_entries %}
+          <tr>
+            <td><code>{{ entry.occurred_at|escape }}</code></td>
+            <td><code>{{ entry.event|escape }}</code></td>
+            <td>{{ entry.detail|escape }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <details>
+      <summary>{{ text_telemetry_log_raw }}</summary>
+      <pre style="max-height: 320px; overflow: auto;">{{ log_raw|escape }}</pre>
+    </details>
+  </details>
+  {% endif %}
+</div>
+
+<div class="modal fade" id="paypercut-debug-session-modal" tabindex="-1" role="dialog">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="{{ button_telemetry_cancel }}">&times;</button>
+        <h4 class="modal-title">{{ text_telemetry_modal_title }}</h4>
+      </div>
+      <div class="modal-body">
+        <p>{{ text_telemetry_modal_lead }}</p>
+        <p>{{ text_telemetry_shared }}</p>
+        <p><strong>{{ text_telemetry_not_shared_label }}</strong> {{ text_telemetry_not_shared }}</p>
+        <p>{{ text_telemetry_key_use }}</p>
+        <p>{{ text_telemetry_retention }}</p>
+        <p class="help-block">{{ text_telemetry_modal_help }}</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" data-dismiss="modal">{{ button_telemetry_cancel }}</button>
+        <button type="button" class="btn btn-primary paypercut-debug-session-confirm">{{ button_telemetry_confirm }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="text/javascript">
+(function ($) {
+    'use strict';
+
+    var panel = document.getElementById('paypercut-debug-session');
+
+    if (!panel) {
+        return;
+    }
+
+    var config = {
+        startUrl: '{{ start_url }}',
+        stopUrl: '{{ stop_url }}',
+        statusUrl: '{{ status_url }}',
+        pollSeconds: {{ poll_seconds }},
+        i18n: {
+            starting: '{{ text_telemetry_starting|e('js') }}',
+            stopping: '{{ text_telemetry_stopping|e('js') }}',
+            startSession: '{{ button_telemetry_confirm|e('js') }}',
+            stopNow: '{{ button_telemetry_stop|e('js') }}',
+            copied: '{{ text_telemetry_copied|e('js') }}',
+            sessionEnded: '{{ text_telemetry_session_ended_notice|e('js') }}',
+            adminUnreachable: '{{ text_telemetry_admin_unreachable|e('js') }}',
+            networkError: '{{ text_telemetry_network_error|e('js') }}'
+        }
+    };
+
+    var state = {
+        state: '{{ state }}',
+        session_id: '{{ session_id|e('js') }}',
+        expires_at: {{ expires_at }},
+        events_sent: {{ events_sent }},
+        events_dropped: {{ events_dropped }},
+        message: '{{ message|e('js') }}',
+        trace_id: '{{ trace_id|e('js') }}',
+        started_by_name: '{{ started_by_name|e('js') }}'
+    };
+
+    var statusBox = document.getElementById('paypercut-debug-session-status');
+    var pollTimer = null;
+    var tickTimer = null;
+    // Guards against the deadline tick firing a request every second.
+    var polling = false;
+    var deadlineConfirmed = false;
+    var pollFailures = 0;
+    // Offset between this browser's clock and the server's, so a wrong local
+    // clock cannot make the countdown disagree with when the session ends.
+    var clockOffset = {{ now }} - Math.floor(Date.now() / 1000);
+
+    function serverNow() {
+        return Math.floor(Date.now() / 1000) + clockOffset;
+    }
+
+    function show(message, kind) {
+        $(statusBox).attr('class', 'alert alert-' + (kind === 'error' ? 'danger' : 'success')).text(message).show();
+    }
+
+    function hideStatus() {
+        $(statusBox).hide();
+    }
+
+    function fill(selector, value) {
+        $(panel).find(selector).text(value);
+    }
+
+    function formatClock(unixSeconds) {
+        var date = new Date(unixSeconds * 1000);
+        var hours = date.getHours();
+        var minutes = date.getMinutes();
+
+        return (hours < 10 ? '0' + hours : String(hours)) + ':' + (minutes < 10 ? '0' + minutes : String(minutes));
+    }
+
+    function formatRemaining(seconds) {
+        if (seconds < 0) {
+            seconds = 0;
+        }
+
+        var minutes = Math.floor(seconds / 60);
+        var rest = seconds % 60;
+
+        return minutes + ':' + (rest < 10 ? '0' + rest : String(rest));
+    }
+
+    function render() {
+        $(panel).find('[data-paypercut-state]').each(function () {
+            $(this).toggle($(this).attr('data-paypercut-state') === state.state);
+        });
+
+        fill('[data-paypercut-session-id]', state.session_id || '');
+        fill('[data-paypercut-started-by]', state.started_by_name || '');
+        fill('[data-paypercut-sent]', String(state.events_sent || 0));
+        fill('[data-paypercut-dropped]', String(state.events_dropped || 0));
+        fill('[data-paypercut-ends-at]', state.expires_at ? formatClock(state.expires_at) : '');
+
+        if (state.state === 'failed') {
+            // The failed block carries this message itself; leaving the status
+            // box up as well prints the same red notice twice.
+            hideStatus();
+            fill('[data-paypercut-failed-message]', state.message || '');
+            fill('[data-paypercut-trace-id]', state.trace_id || '');
+            $(panel).find('[data-paypercut-reference]').toggle(!!state.trace_id);
+        }
+
+        tick();
+    }
+
+    function tick() {
+        if (state.state !== 'running') {
+            return;
+        }
+
+        var remaining = (state.expires_at || 0) - serverNow();
+
+        fill('[data-paypercut-countdown]', formatRemaining(remaining));
+
+        // Ask the server to confirm and tear down — once, not once per second.
+        if (remaining <= 0 && !deadlineConfirmed) {
+            deadlineConfirmed = true;
+            poll();
+        }
+    }
+
+    function apply(next) {
+        var ended = state.state === 'running' && next.state !== 'running';
+        var started = state.state !== 'running' && next.state === 'running';
+
+        state = next;
+        pollFailures = 0;
+
+        if (started) {
+            deadlineConfirmed = false;
+            // Starting clears the log server-side. This block is rendered once
+            // per page load, so without this the merchant expands it and reads
+            // the previous session's events under the new session's heading.
+            dropSentLog();
+        }
+
+        if (typeof next.now === 'number') {
+            clockOffset = next.now - Math.floor(Date.now() / 1000);
+        }
+
+        render();
+
+        if (next.state !== 'running') {
+            stopTicking();
+        } else {
+            startTicking();
+        }
+
+        if (ended) {
+            show(config.i18n.sessionEnded, 'success');
+        }
+    }
+
+    function dropSentLog() {
+        $(panel).find('[data-paypercut-log]').remove();
+    }
+
+    function request(url, onDone) {
+        $.ajax({
+            url: url,
+            type: 'post',
+            dataType: 'json',
+            success: function (json) {
+                onDone(json, null);
+            },
+            error: function (xhr) {
+                // A host WAF answering the admin endpoint with HTML lands here,
+                // as does a 403 or 409 carrying a JSON body.
+                var parsed = null;
+
+                try {
+                    parsed = JSON.parse(xhr.responseText);
+                } catch (error) {
+                    parsed = null;
+                }
+
+                onDone(parsed, parsed ? null : new Error('request failed'));
+            }
+        });
+    }
+
+    function poll() {
+        if (polling) {
+            return;
+        }
+
+        polling = true;
+
+        request(config.statusUrl, function (json, error) {
+            polling = false;
+
+            if (error) {
+                pollFailures++;
+
+                // A blip should not freeze the panel for good, but a host that
+                // keeps answering with HTML should not be polled forever either.
+                if (pollFailures >= 3) {
+                    stopPolling();
+                    stopTicking();
+                    show(config.i18n.adminUnreachable, 'error');
+                    return;
+                }
+
+                schedulePoll(pollFailures * 30000);
+                return;
+            }
+
+            if (json && json.success && json.data) {
+                apply(json.data);
+            }
+
+            schedulePoll();
+        });
+    }
+
+    function schedulePoll(overrideMs) {
+        stopPolling();
+
+        if (state.state !== 'running' || document.hidden) {
+            return;
+        }
+
+        // ±20% jitter so many open dashboards do not land together.
+        var delay = overrideMs || (config.pollSeconds * 1000) * (0.8 + Math.random() * 0.4);
+
+        pollTimer = window.setTimeout(poll, delay);
+    }
+
+    function stopPolling() {
+        if (pollTimer) {
+            window.clearTimeout(pollTimer);
+            pollTimer = null;
+        }
+    }
+
+    function startTicking() {
+        if (!tickTimer) {
+            tickTimer = window.setInterval(tick, 1000);
+        }
+    }
+
+    function stopTicking() {
+        if (tickTimer) {
+            window.clearInterval(tickTimer);
+            tickTimer = null;
+        }
+    }
+
+    function copySessionId(button) {
+        // Two rows offer a Copy button — the session id and the support
+        // reference — so copy the code beside this one, not the first on screen.
+        var node = $(button).closest('p').find('code').get(0) || $(panel).find('[data-paypercut-session-id]').get(0);
+        var value = node ? node.textContent : '';
+
+        if (!value) {
+            return;
+        }
+
+        var field = document.createElement('textarea');
+        field.value = value;
+        document.body.appendChild(field);
+        field.select();
+
+        try {
+            document.execCommand('copy');
+            var original = $(button).text();
+            $(button).text(config.i18n.copied);
+            window.setTimeout(function () {
+                $(button).text(original);
+            }, 2000);
+        } catch (error) {
+            // Copying is a convenience; the id is on screen either way.
+        }
+
+        document.body.removeChild(field);
+    }
+
+    $(panel).on('click', '.paypercut-debug-session-start', function (event) {
+        event.preventDefault();
+        hideStatus();
+        $('#paypercut-debug-session-modal').modal('show');
+    });
+
+    $(panel).on('click', '.paypercut-debug-session-stop', function (event) {
+        event.preventDefault();
+
+        var button = $(this);
+        button.prop('disabled', true).text(config.i18n.stopping);
+
+        request(config.stopUrl, function (json, error) {
+            button.prop('disabled', false).text(config.i18n.stopNow);
+
+            if (error) {
+                show(config.i18n.networkError, 'error');
+                return;
+            }
+
+            if (json && json.success && json.data) {
+                apply(json.data);
+            } else if (json && json.data && json.data.message) {
+                show(json.data.message, 'error');
+            }
+        });
+    });
+
+    $(panel).on('click', '[data-paypercut-copy]', function (event) {
+        event.preventDefault();
+        copySessionId(this);
+    });
+
+    $('#paypercut-debug-session-modal').on('click', '.paypercut-debug-session-confirm', function (event) {
+        event.preventDefault();
+
+        var button = $(this);
+        button.prop('disabled', true).text(config.i18n.starting);
+
+        request(config.startUrl, function (json, error) {
+            button.prop('disabled', false).text(config.i18n.startSession);
+            $('#paypercut-debug-session-modal').modal('hide');
+
+            if (error) {
+                show(config.i18n.networkError, 'error');
+                return;
+            }
+
+            if (json && json.success && json.data) {
+                apply(json.data);
+                schedulePoll();
+                return;
+            }
+
+            if (json && json.data && json.data.message) {
+                show(json.data.message, 'error');
+            }
+
+            // A rejected start writes a `failed` record, so re-read it.
+            poll();
+        });
+    });
+
+    $(document).on('visibilitychange', function () {
+        if (document.hidden) {
+            stopPolling();
+            return;
+        }
+
+        if (state.state === 'running') {
+            poll();
+        }
+    });
+
+    render();
+    schedulePoll();
+
+    if (state.state === 'running') {
+        startTicking();
+    }
+})(jQuery);
+</script>
