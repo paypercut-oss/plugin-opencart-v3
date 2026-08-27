@@ -189,6 +189,15 @@ than a named subset is deliberate: a field added to the wire shape later is
 covered without anyone remembering to list it, and `tests/run.php` poisons every
 leaf of a fully populated envelope to keep it that way.
 
+Three details make "every value" literal. Non-string scalars are cast before
+they are screened, because an int carries a PAN as happily as a string does.
+A structure nested deeper than the wire contract, or a leaf that is not a scalar
+at all, is denied rather than stepped over — a value this gate cannot read is
+not a value it may assume safe. And because `Event::text()` clamps to
+`MAX_TEXT_BYTES` before the gate ever runs, a credential straddling the byte
+budget arrives as its own opening fragment; the credential comparison matches
+that cut as well as the whole string.
+
 The admin user who started a session is kept in the local record for the banner
 but is deliberately absent from `session.started`: a store-user identifier is not
 covered by the disclosure above.

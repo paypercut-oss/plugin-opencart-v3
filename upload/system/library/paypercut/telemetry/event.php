@@ -31,6 +31,19 @@ class Event
     const MAX_STACK_FRAMES = 8;
 
     /**
+     * How deep the wire shape nests: `error`, and `error.stack` inside it.
+     */
+    const MAX_ENVELOPE_DEPTH = 2;
+
+    /**
+     * Shortest leading run of a secret that counts as a clamped credential.
+     *
+     * Short enough to catch a byte-budget cut, long enough that ordinary
+     * diagnostic text does not end in one by coincidence.
+     */
+    const MIN_SECRET_FRAGMENT = 8;
+
+    /**
      * Field names that must never appear in an event, whatever their value.
      */
     const DENIED_KEY_PATTERN = '/secret|token|password|credential|nonce|auth|_key$/i';
@@ -404,22 +417,43 @@ class Event
             // it. Without recursion the assertion sees a non-string and gives
             // up, which is exactly where free text now lives.
             if (is_array($value)) {
-                if ($depth < 2 && self::isDenied($value, $secrets, $depth + 1)) {
+                // Denied rather than skipped past: a structure deeper than the
+                // wire contract is one this gate cannot read, and an unreadable
+                // value is exactly what must not be assumed safe.
+                if ($depth >= self::MAX_ENVELOPE_DEPTH) {
+                    return true;
+                }
+
+                if (self::isDenied($value, $secrets, $depth + 1)) {
                     return true;
                 }
 
                 continue;
             }
 
-            if (!is_string($value) || $value === '') {
+            if ($value === null) {
                 continue;
             }
 
-            if (preg_match(self::DENIED_VALUE_PATTERN, $value)) {
+            // Objects and resources have no screenable text, and json_encode
+            // would still serialise their public state onto the wire.
+            if (!is_scalar($value)) {
                 return true;
             }
 
-            if (self::containsCardNumber($value)) {
+            // Cast rather than string-tested: an int carries a PAN as happily
+            // as a string does, and `attrs` passes non-string scalars through.
+            $text = (string)$value;
+
+            if ($text === '') {
+                continue;
+            }
+
+            if (preg_match(self::DENIED_VALUE_PATTERN, $text)) {
+                return true;
+            }
+
+            if (self::containsCardNumber($text)) {
                 return true;
             }
 
@@ -427,9 +461,34 @@ class Event
             // credentials is not. This catches a secret in a format nobody
             // anticipated, including one a future Paypercut release introduces.
             foreach ($secrets as $secret) {
-                if (is_string($secret) && $secret !== '' && strpos($value, $secret) !== false) {
+                if (!is_string($secret) || $secret === '') {
+                    continue;
+                }
+
+                if (strpos($text, $secret) !== false || self::endsWithFragmentOf($text, $secret)) {
                     return true;
                 }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * True when this value ends in the opening bytes of a secret.
+     *
+     * text() clamps before this gate ever runs, so a credential straddling the
+     * byte budget reaches the wire as its own leading fragment and the
+     * containment test above sees nothing. Matching the cut restores the
+     * comparison the ordering took away.
+     */
+    private static function endsWithFragmentOf($value, $secret)
+    {
+        $longest = min(strlen($value), strlen($secret) - 1);
+
+        for ($length = $longest; $length >= self::MIN_SECRET_FRAGMENT; $length--) {
+            if (substr($value, -$length) === substr($secret, 0, $length)) {
+                return true;
             }
         }
 

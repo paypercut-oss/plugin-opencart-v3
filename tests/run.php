@@ -247,6 +247,47 @@ foreach ($poisons as $label => $poison) {
     }
 }
 
+// A field the gate cannot read as text is denied, not stepped over: that is what
+// makes "every value in the envelope" hold for a shape nobody has written yet.
+$store_secret = 'a-store-secret-in-no-known-format';
+
+check(
+    'a non-string scalar is screened too',
+    EventQueue::screen(Event::of('test.event', array('n' => 4111111111111111))->envelope(0), $store_secrets)
+);
+
+check(
+    'a structure deeper than the wire contract is denied',
+    EventQueue::screen(
+        array('event' => 'test.event', 'error' => array('stack' => array(array('leaked' => $store_secret)))),
+        $store_secrets
+    )
+);
+
+check(
+    'a non-scalar leaf is denied',
+    EventQueue::screen(array('event' => 'test.event', 'attrs' => array('o' => new stdClass())), $store_secrets)
+);
+
+// text() clamps before the gate runs, so a credential straddling the byte
+// budget arrives as its own opening fragment with nothing left to contain it.
+$clamped = Event::of('test.event', array('note' => str_repeat('x', 240) . $store_secret))->envelope(0);
+
+same('the clamp really did cut the secret', 256, strlen($clamped['attrs']['note']));
+check('the clamped remainder no longer contains the secret', strpos($clamped['attrs']['note'], $store_secret) === false);
+check('a secret cut by the byte clamp is still denied', EventQueue::screen($clamped, $store_secrets));
+
+// Widening must not start binning ordinary events.
+check(
+    'ordinary prose survives the fragment match',
+    !EventQueue::screen(
+        Event::of('payment.succeeded', array('mode' => 'hosted', 'note' => 'nothing to declare'))
+            ->about(array('order_ref' => 'OC-2026/8891'))
+            ->envelope(0),
+        $store_secrets
+    )
+);
+
 // --- Named constructors are the boundary ------------------------------------
 
 $snapshot = Event::environmentSnapshot(
