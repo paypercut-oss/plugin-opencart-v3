@@ -453,7 +453,8 @@ check(
 
 // --- Separators other than space and hyphen ---------------------------------
 
-foreach (array('.', '/', ',', '_', "\xC2\xA0") as $separator) {
+foreach (array('.', '/', ',', '_', "\xC2\xA0",
+    "\xE2\x80\x93", "\xE2\x80\x94", "\xE2\x80\xAF", "\xE2\x88\x92") as $separator) {
     check(
         'a PAN grouped with ' . json_encode($separator) . ' is denied',
         Event::containsCardNumber('4111' . $separator . '1111' . $separator . '1111' . $separator . '1111')
