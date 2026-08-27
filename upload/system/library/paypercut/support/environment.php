@@ -37,6 +37,27 @@ class Environment
     }
 
     /**
+     * Merchant Dashboard base URI for a stored connection environment.
+     *
+     * Falls back to production for the same reason apiBaseUri() does: a store
+     * that never chose an environment keeps the link it has always had.
+     */
+    public static function dashboardBaseUri($environment = '')
+    {
+        $base_uris = array(
+            'dev' => 'https://dashboard.dev.paypercut.net/',
+            'stage' => 'https://dashboard.stage.paypercut.net/',
+            'production' => 'https://dashboard.paypercut.io/'
+        );
+
+        if (isset($base_uris[$environment])) {
+            return $base_uris[$environment];
+        }
+
+        return $base_uris[self::DEFAULT_ENVIRONMENT];
+    }
+
+    /**
      * Telemetry edge base URI for a stored connection environment.
      *
      * Unlike the API base this does NOT fall back to production: an unknown

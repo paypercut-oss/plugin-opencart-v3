@@ -66,8 +66,11 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
                 $tab_data['total_refunded'] = $this->getTotalRefunded($order_id);
                 $tab_data['can_refund'] = ($transaction['status'] === 'succeeded' && $tab_data['total_refunded'] < $transaction['amount']);
 
-                // Paypercut Dashboard link
-                $tab_data['paypercut_dashboard_url'] = 'https://dashboard.paypercut.io/payments/' . $transaction['payment_id'];
+                // Paypercut Dashboard link, for the environment this store is
+                // connected to: a dev/stage payment has no production record.
+                $tab_data['paypercut_dashboard_url'] = Environment::dashboardBaseUri(
+                    (string)$this->config->get('payment_paypercut_environment')
+                ) . 'payments/' . $transaction['payment_id'];
             } else {
                 $tab_data['has_transaction'] = false;
                 $tab_data['refunds'] = array();

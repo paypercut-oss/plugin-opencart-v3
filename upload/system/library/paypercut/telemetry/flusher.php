@@ -2,6 +2,8 @@
 
 namespace Paypercut\Telemetry;
 
+use Paypercut\Support\Environment;
+
 /**
  * Delivers queued diagnostic events to the telemetry edge.
  *
@@ -89,7 +91,11 @@ class Flusher
             return false;
         }
 
-        $edge_base = (string)(isset($record['edge_base']) ? $record['edge_base'] : '');
+        // Re-validated rather than trusted: this is the one place a bearer
+        // token is sent to a URL read back out of storage.
+        $edge_base = Environment::allowedPaypercutBase(
+            (string)(isset($record['edge_base']) ? $record['edge_base'] : '')
+        );
 
         if ($edge_base === '') {
             TelemetrySession::end('environment_changed');

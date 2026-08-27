@@ -42,18 +42,26 @@ class EnvironmentSnapshot
         );
     }
 
+    /**
+     * Test or live, from the key's prefix alone — never any of the key itself.
+     *
+     * Both the `sk_` and the `ppc_` families are recognised: the settings form
+     * documents `sk_`, and `ppc_` is what the deny assertion treats as a
+     * Paypercut credential, so a store on either would otherwise report
+     * 'unknown' for the one question this field exists to answer.
+     */
     private static function apiKeyMode($api_key)
     {
         if ($api_key === '') {
             return '';
         }
 
-        if (strpos($api_key, 'sk_test') === 0) {
-            return 'test';
-        }
-
-        if (strpos($api_key, 'sk_live') === 0) {
-            return 'live';
+        foreach (array('sk_', 'ppc_') as $prefix) {
+            foreach (array('test', 'live') as $mode) {
+                if (strpos($api_key, $prefix . $mode) === 0) {
+                    return $mode;
+                }
+            }
         }
 
         return 'unknown';

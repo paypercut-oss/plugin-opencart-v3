@@ -15,9 +15,10 @@ Paypercut OpenCart V3 Payment Module
 
 The **Environment** setting (Extensions → Payments → Paypercut → API
 Configuration) picks which Paypercut environment the store talks to:
-`production` (default), `stage` or `dev`. It resolves both the payment API host
-and the telemetry edge host, so the two can never disagree. Existing stores that
-have never saved it keep talking to production.
+`production` (default), `stage` or `dev`. It resolves the payment API host, the
+telemetry edge host and the Merchant Dashboard link on the order screen, so they
+can never disagree. Existing stores that have never saved it keep talking to
+production.
 
 ## Debug sessions
 
