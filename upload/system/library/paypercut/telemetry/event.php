@@ -59,6 +59,34 @@ class Event
     const DENIED_VALUE_PATTERN = '/(?:^|[^A-Za-z0-9_])(ppc_|sk_|pk_|whsec_|eyJ[A-Za-z0-9_-]+\.)/i';
 
     /**
+     * What text() returns instead of clamping a value that failed the screen.
+     *
+     * Clamping first is what makes a partial PAN shippable: 15 of 16 digits
+     * Luhn-complete to exactly one card. text() therefore screens the value it
+     * was given and, when it trips, hands back this marker — which the gate
+     * denies, dropping the whole event exactly as any other denial does.
+     */
+    const DENIED_MARKER = '[paypercut:denied]';
+
+    /**
+     * Card-network prefixes and the PAN lengths each one issues.
+     *
+     * The scan slides across a digit run, so it must not accept any Luhn-valid
+     * 13-19 digit window: a random 20-digit run contains one ~96% of the time.
+     * Requiring an issuer prefix at a length that issuer actually uses keeps
+     * every real PAN and drops that to a quarter.
+     */
+    private static $card_networks = array(
+        '/^4/' => array(13, 16, 19),
+        '/^(?:5[1-5]|2(?:2[2-9]|[3-6]\d|7[01]|720))/' => array(16),
+        '/^3[47]/' => array(15),
+        '/^(?:6011|64[4-9]|65)/' => array(16, 19),
+        '/^(?:30[0-5]|3[689])/' => array(14, 16, 19),
+        '/^35/' => array(16, 19),
+        '/^62/' => array(16, 17, 18, 19)
+    );
+
+    /**
      * Host and platform versions. Read by environmentSnapshot().
      *
      * Both snapshot lists are iterated INSTEAD of the caller's array: pulling
@@ -314,24 +342,22 @@ class Event
      * on the webhook path they come from a request body that is unsigned
      * whenever no webhook secret is configured, so an id that is not
      * identifier-shaped is not ours and is dropped rather than forwarded.
-     * `order_ref` is the merchant's own reference and keeps its own format.
+     *
+     * `order_ref` is identifier-bounded for the same reason, and is lossless
+     * here: every call site passes (string)$order_id, and OpenCart's order id
+     * is the numeric primary key of `oc_order`. Clamped free text let a script
+     * tag, a URL and an RTL override travel under a correlation field.
      */
     public function about(array $correlation)
     {
-        $shapes = array(
-            'payment_intent_id' => 'identifier',
-            'payment_id' => 'identifier',
-            'order_ref' => 'text'
-        );
-
-        foreach ($shapes as $field => $shape) {
+        foreach (array('payment_intent_id', 'payment_id', 'order_ref') as $field) {
             $value = trim((string)(isset($correlation[$field]) ? $correlation[$field] : ''));
 
             if ($value === '') {
                 continue;
             }
 
-            $clean = $shape === 'identifier' ? self::identifier($value) : self::text($value);
+            $clean = self::identifier($value);
 
             if ($clean !== '') {
                 $this->correlation[$field] = $clean;
@@ -413,6 +439,12 @@ class Event
                 return true;
             }
 
+            // Keys are wire content too: json_encode writes an attribute name
+            // out verbatim, so it needs the same value screens as the value.
+            if (self::deniedValue((string)$key, $secrets)) {
+                return true;
+            }
+
             // The contract nests one level — `error`, and `error.stack` inside
             // it. Without recursion the assertion sees a non-string and gives
             // up, which is exactly where free text now lives.
@@ -443,31 +475,50 @@ class Event
 
             // Cast rather than string-tested: an int carries a PAN as happily
             // as a string does, and `attrs` passes non-string scalars through.
-            $text = (string)$value;
+            if (self::deniedValue((string)$value, $secrets)) {
+                return true;
+            }
+        }
 
-            if ($text === '') {
+        return false;
+    }
+
+    /**
+     * True when this piece of text may not travel, whatever position it holds.
+     *
+     * Applied to keys as well as values: an attribute NAME is serialised onto
+     * the wire byte for byte, so a PAN or an API key in key position leaks
+     * exactly as one in value position does. Every attrs key is a literal
+     * today, which is why nobody noticed.
+     */
+    public static function deniedValue($text, array $secrets = array())
+    {
+        if ($text === '') {
+            return false;
+        }
+
+        if ($text === self::DENIED_MARKER) {
+            return true;
+        }
+
+        if (preg_match(self::DENIED_VALUE_PATTERN, $text)) {
+            return true;
+        }
+
+        if (self::containsCardNumber($text)) {
+            return true;
+        }
+
+        // Shape matching is a guess; comparing against the store's actual
+        // credentials is not. This catches a secret in a format nobody
+        // anticipated, including one a future Paypercut release introduces.
+        foreach ($secrets as $secret) {
+            if (!is_string($secret) || $secret === '') {
                 continue;
             }
 
-            if (preg_match(self::DENIED_VALUE_PATTERN, $text)) {
+            if (strpos($text, $secret) !== false || self::endsWithFragmentOf($text, $secret)) {
                 return true;
-            }
-
-            if (self::containsCardNumber($text)) {
-                return true;
-            }
-
-            // Shape matching is a guess; comparing against the store's actual
-            // credentials is not. This catches a secret in a format nobody
-            // anticipated, including one a future Paypercut release introduces.
-            foreach ($secrets as $secret) {
-                if (!is_string($secret) || $secret === '') {
-                    continue;
-                }
-
-                if (strpos($text, $secret) !== false || self::endsWithFragmentOf($text, $secret)) {
-                    return true;
-                }
             }
         }
 
@@ -477,10 +528,10 @@ class Event
     /**
      * True when this value ends in the opening bytes of a secret.
      *
-     * text() clamps before this gate ever runs, so a credential straddling the
-     * byte budget reaches the wire as its own leading fragment and the
-     * containment test above sees nothing. Matching the cut restores the
-     * comparison the ordering took away.
+     * text() screens the shapes it can recognise before it clamps, but it has no
+     * access to the store's credentials, so a secret of no known format
+     * straddling the byte budget still reaches this gate as its own leading
+     * fragment. Matching the cut restores the comparison the clamp took away.
      */
     private static function endsWithFragmentOf($value, $secret)
     {
@@ -496,21 +547,55 @@ class Event
     }
 
     /**
-     * A Luhn-valid 13-19 digit run anywhere in the value.
+     * A PAN anywhere inside a digit run, at any offset within it.
      *
-     * The edge screens for a PAN too, but only when the whole value is one:
-     * "Card 4111111111111111 was declined" passes it. Card data must never
+     * The edge screens for a card number too, but only when the whole value is
+     * one: "Card 4111111111111111 was declined" passes it. Card data must never
      * leave a merchant estate, so the client is the right place to enforce it.
+     *
+     * Every offset is tried, not just the start of the run: anchoring let
+     * '0000' . $pan through, and a PAN concatenated to a reference is the shape
+     * a real leak takes.
      */
     public static function containsCardNumber($value)
     {
-        if (!preg_match_all('/\d(?:[ -]?\d){12,18}/', $value, $matches)) {
+        if (!preg_match_all('/\d(?:[ -]?\d)+/', (string)$value, $matches)) {
             return false;
         }
 
-        foreach ($matches[0] as $candidate) {
-            if (self::luhnValid(preg_replace('/\D/', '', $candidate))) {
+        foreach ($matches[0] as $run) {
+            if (self::runCarriesCardNumber((string)preg_replace('/\D/', '', $run))) {
                 return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Slide every issuer prefix across one run of digits.
+     */
+    private static function runCarriesCardNumber($digits)
+    {
+        $length = strlen($digits);
+
+        for ($offset = 0; $offset + 13 <= $length; $offset++) {
+            $head = substr($digits, $offset, 4);
+
+            foreach (self::$card_networks as $prefix => $lengths) {
+                if (!preg_match($prefix, $head)) {
+                    continue;
+                }
+
+                foreach ($lengths as $pan_length) {
+                    if ($offset + $pan_length > $length) {
+                        continue;
+                    }
+
+                    if (self::luhnValid(substr($digits, $offset, $pan_length))) {
+                        return true;
+                    }
+                }
             }
         }
 
@@ -531,6 +616,14 @@ class Event
         if ($clean === '' && $value !== '') {
             // Invalid UTF-8 made the unicode-mode replace fail; fall back to ASCII.
             $clean = (string)preg_replace('/[^\x20-\x7E]/', '', $value);
+        }
+
+        // Screened BEFORE the clamp, not after it. A PAN starting at byte 241
+        // survives a 256-byte cut as 15 digits, and 15 digits Luhn-complete to
+        // exactly one card — the clamp is what destroys the evidence, so the
+        // check has to happen while the value is still whole.
+        if (self::deniedValue($clean)) {
+            return self::DENIED_MARKER;
         }
 
         if (strlen($clean) <= self::MAX_TEXT_BYTES) {

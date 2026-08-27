@@ -171,11 +171,13 @@ copies an exception's message either, and `Event::fatal()` classifies
 the one way a message reaches the wire, and it only ever carries text this
 module authored.
 
-`about()` shape-checks the two Paypercut ids with `Event::identifier()` rather
-than merely clamping them: the webhook route accepts an unsigned delivery
-whenever no webhook secret is configured, so `payment_id` and
-`payment_intent_id` are attacker-controlled on that path. `order_ref` is the
-merchant's own reference and keeps whatever format they use.
+`about()` shape-checks all three correlation ids with `Event::identifier()`
+rather than merely clamping them: the webhook route accepts an unsigned delivery
+whenever no webhook secret is configured, so `payment_id`, `payment_intent_id`
+and `order_ref` are all attacker-controlled on that path. Clamped free text let
+a script tag, a URL and an RTL override travel under `order_ref`. The bound is
+lossless here — every call site passes `(string)$order_id`, the numeric primary
+key of `oc_order`.
 
 The deny assertion in `EventQueue::append()` is the last gate. It drops the
 **whole event**, not the offending field: an event that trips it was assembled
@@ -183,20 +185,30 @@ wrongly, so the rest of it cannot be trusted either. It screens the **entire
 serialised envelope** — `attrs`, `error` (including `error.stack`, two levels
 down), and the top-level `order_ref` / `payment_id` / `payment_intent_id`
 correlation fields, whose values arrive from an unauthenticated request body on
-the webhook path — against denied key names, denied value shapes, a Luhn PAN
-check and the store's actual credentials. Screening the envelope itself rather
-than a named subset is deliberate: a field added to the wire shape later is
-covered without anyone remembering to list it, and `tests/run.php` poisons every
-leaf of a fully populated envelope to keep it that way.
+the webhook path — against denied key names, denied value shapes, a card-number
+check and the store's actual credentials. Attribute **names** get the value
+screens too, not just the name regex: `json_encode` writes a key onto the wire
+verbatim, so a PAN in key position leaks exactly as one in value position does.
+Screening the envelope itself rather than a named subset is deliberate: a field
+added to the wire shape later is covered without anyone remembering to list it,
+and `tests/run.php` poisons every leaf **and every key** of a fully populated
+envelope to keep it that way.
 
-Three details make "every value" literal. Non-string scalars are cast before
+Four details make "every value" literal. Non-string scalars are cast before
 they are screened, because an int carries a PAN as happily as a string does.
 A structure nested deeper than the wire contract, or a leaf that is not a scalar
 at all, is denied rather than stepped over — a value this gate cannot read is
-not a value it may assume safe. And because `Event::text()` clamps to
-`MAX_TEXT_BYTES` before the gate ever runs, a credential straddling the byte
-budget arrives as its own opening fragment; the credential comparison matches
-that cut as well as the whole string.
+not a value it may assume safe. And `Event::text()` screens the value it was
+given **before** it clamps to `MAX_TEXT_BYTES`, returning a marker the gate
+denies: a PAN starting at byte 241 otherwise survives a 256-byte cut as 15 of
+16 digits, and 15 digits Luhn-complete to exactly one card. The per-secret
+fragment match still covers a store credential cut by that same clamp.
+
+The card-number check slides across a run of digits instead of anchoring to its
+start, so `'0000' . $pan` and a PAN concatenated to a reference are both caught.
+Each window has to carry an issuer prefix at a length that issuer actually uses:
+accepting any Luhn-valid 13-19 digit window would deny a random 20-digit run
+about 96% of the time, and a false denial drops a whole event.
 
 The admin user who started a session is kept in the local record for the banner
 but is deliberately absent from `session.started`: a store-user identifier is not

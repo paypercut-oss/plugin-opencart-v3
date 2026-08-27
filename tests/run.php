@@ -219,7 +219,7 @@ foreach (array('event', 'occurred_at', 'order_ref', 'payment_id', 'payment_inten
 // Widening the screen must not start dropping ordinary traffic: real Paypercut
 // identifiers and a merchant's own order reference format have to survive it.
 $real_ids = array(
-    array('order_ref' => 'OC-2026/8891', 'payment_id' => 'pay_9RTvK2', 'payment_intent_id' => 'pi_9RTvK2'),
+    array('order_ref' => '4187', 'payment_id' => 'pay_9RTvK2', 'payment_intent_id' => 'pi_9RTvK2'),
     array('order_ref' => '178', 'payment_id' => 'cs_apm_123', 'payment_intent_id' => 'pm_123')
 );
 
@@ -282,11 +282,227 @@ check(
     'ordinary prose survives the fragment match',
     !EventQueue::screen(
         Event::of('payment.succeeded', array('mode' => 'hosted', 'note' => 'nothing to declare'))
-            ->about(array('order_ref' => 'OC-2026/8891'))
+            ->about(array('order_ref' => '4187'))
             ->envelope(0),
         $store_secrets
     )
 );
+
+// --- Poison in KEY position -------------------------------------------------
+
+/**
+ * One copy of $envelope per key, with $poison substituted for that key.
+ *
+ * A key is wire content: json_encode writes an attribute name out verbatim, so
+ * the value screens have to run over it too. The existing walk only ever
+ * poisoned values, which is precisely why the hole survived review.
+ */
+function poisonKeys($value, $poison, $path = '')
+{
+    if (!is_array($value)) {
+        return array();
+    }
+
+    $cases = array();
+
+    foreach ($value as $key => $child) {
+        $child_path = $path === '' ? (string)$key : $path . '.' . $key;
+
+        $copy = $value;
+        unset($copy[$key]);
+        $copy[$poison] = $child;
+
+        $cases[] = array('path' => $child_path, 'value' => $copy);
+
+        foreach (poisonKeys($child, $poison, $child_path) as $nested) {
+            $copy = $value;
+            $copy[$key] = $nested['value'];
+
+            $cases[] = array('path' => $nested['path'], 'value' => $copy);
+        }
+    }
+
+    return $cases;
+}
+
+$key_poisons = array(
+    'pan' => '4111111111111111',
+    'paypercut key shape' => 'ppc_live_ABCDEF',
+    'literal store api key' => 'sk_live_STORE_KEY',
+    'literal store secret of unknown shape' => 'a-store-secret-in-no-known-format'
+);
+
+$key_cases = 0;
+
+foreach ($key_poisons as $label => $poison) {
+    foreach (poisonKeys($populated, $poison) as $case) {
+        $key_cases++;
+
+        check(
+            'the gate screens the key at ' . $case['path'] . ' for a ' . $label,
+            EventQueue::screen($case['value'], $store_secrets)
+        );
+    }
+}
+
+check('the key walk actually reached something', $key_cases > 20);
+
+// environmentPlugins() is the one producer whose attribute names come from the
+// store rather than from a literal, so it is where a poisoned key would land.
+foreach ($key_poisons as $label => $poison) {
+    $plugins = Event::environmentPlugins(array($poison => '1.0'));
+
+    check(
+        'an extension code carrying a ' . $label . ' is denied in key position',
+        EventQueue::screen($plugins[0]->envelope(0), $store_secrets)
+    );
+
+    check(
+        'an attrs key carrying a ' . $label . ' is denied',
+        EventQueue::screen(Event::of('test.event', array($poison => 1))->envelope(0), $store_secrets)
+    );
+}
+
+// --- Screening happens BEFORE the clamp, not after it -----------------------
+
+// 241 filler bytes then a PAN: the 256-byte clamp keeps 15 of the 16 digits,
+// and 15 digits Luhn-complete to exactly one card. Redaction it is not.
+$straddling = Event::of('checkout.hosted.create_failed', array('note' => str_repeat('a', 241) . '4111111111111111'))
+    ->envelope(0);
+
+check('a PAN straddling the byte clamp is denied', EventQueue::screen($straddling, $store_secrets));
+check(
+    'no partial PAN survives into the serialised envelope',
+    !preg_match('/\d{13,}/', json_encode($straddling))
+);
+
+// Every offset around the clamp boundary, not just the one the reviewer used.
+$straddle_leaks = 0;
+
+for ($offset = 200; $offset <= 260; $offset++) {
+    $case = Event::of('test.event', array('note' => str_repeat('a', $offset) . '4111111111111111'))->envelope(0);
+
+    if (!EventQueue::screen($case, $store_secrets)) {
+        $straddle_leaks++;
+    }
+}
+
+same('no clamp offset lets a PAN through', 0, $straddle_leaks);
+
+// The same ordering problem for a credential with no recognisable shape.
+check(
+    'a no-format store secret cut by the clamp is denied',
+    EventQueue::screen(
+        Event::of('test.event', array('note' => str_repeat('a', 248) . $store_secret))->envelope(0),
+        $store_secrets
+    )
+);
+
+// --- A PAN inside a longer digit run ----------------------------------------
+
+$pans = array('4111111111111111', '5555555555554444', '378282246310005', '6011111111111117', '3530111333300000');
+
+foreach ($pans as $pan) {
+    check('bare PAN ' . $pan, Event::containsCardNumber($pan));
+    check('PAN with digits prepended: ' . $pan, Event::containsCardNumber(str_repeat('7', 40) . $pan));
+    check('PAN with digits appended: ' . $pan, Event::containsCardNumber($pan . str_repeat('7', 40)));
+    check('PAN with a zero-padded reference in front: ' . $pan, Event::containsCardNumber('0000' . $pan));
+}
+
+// Sliding without an issuer prefix would deny a random 20-digit run 96% of the
+// time. These are the digit shapes this module's own events really carry.
+$not_cards = array(
+    'transaction 1234567890123456 not found',
+    'expired at 1787250271000',
+    'expired at 17872502710001787250271000',
+    'amount 4250 refused',
+    'order 00000000000000000001',
+    'oc_order 20260827123045678901',
+    'ORD-2024-000123'
+);
+
+foreach ($not_cards as $value) {
+    check('not a card number: ' . $value, !Event::containsCardNumber($value));
+}
+
+// --- Correlation ids are identifier-bounded ---------------------------------
+
+// order_ref used to be clamped free text. On the webhook path the body is
+// unsigned whenever no secret is configured, so 256 bytes of anything reached
+// the wire under a correlation field.
+$hostile_refs = array('<script>x</script>', 'https://evil.example.com/a', "0'; DROP--", "\xE2\x80\xAEtxet", 'jane@example.com', str_repeat('a', 65));
+
+foreach ($hostile_refs as $index => $value) {
+    $ref_case = Event::of('webhook.received')
+        ->about(array('order_ref' => $value, 'payment_id' => $value, 'payment_intent_id' => $value))
+        ->envelope(0);
+
+    check('a correlation id that is not identifier-shaped is dropped (' . $index . ')', !isset($ref_case['order_ref']));
+    check('nothing hostile reaches the wire under a correlation field (' . $index . ')', json_encode($ref_case) === json_encode(array('event' => 'webhook.received', 'occurred_at' => '1970-01-01T00:00:00Z')));
+}
+
+// Lossless for every reference this plugin actually builds: (string)$order_id,
+// the numeric primary key of oc_order.
+foreach (array('1', '178', '4187', '2147483647', 'OC-42', 'pay_9RTvK2', 'pi_9RTvK2', 'cs_apm_123') as $ref) {
+    same('a real order reference survives intact: ' . $ref, $ref, Event::of('t')->about(array('order_ref' => $ref))->envelope(0)['order_ref']);
+}
+
+// --- A clean event must still be delivered ----------------------------------
+
+// A gate that denies everything is not a fix. One realistic instance of each
+// shape a producer in this repo can emit, all of which must survive.
+try {
+    throwingCall();
+} catch (Exception $sweep_exception) {
+    // Caught so the failure envelopes below carry a real stack.
+}
+
+$sweep_api_body = array(
+    'trace_id' => 'da74bc21f0',
+    'error' => array('type' => 'invalid_request_error', 'code' => 'refund_amount_too_large', 'param' => 'amount')
+);
+
+$sweep_correlation = array('order_ref' => '4187', 'payment_id' => 'cs_test_9RTvK2mQ', 'payment_intent_id' => 'pi_9RTvK2mQz');
+
+$clean = array(
+    Event::of('api.request_slow', array('api_context' => 'checkout_session_create', 'method' => 'POST', 'duration_ms' => 5312)),
+    Event::failure('api.request_failed', 'transport', array('api_context' => 'refund_create', 'duration_ms' => 1843), $sweep_exception),
+    Event::apiFailure('api.request_failed', 401, $sweep_api_body, array('api_context' => 'checkout_session_create')),
+    Event::of('checkout.embedded.session_created')->about($sweep_correlation),
+    Event::failure('checkout.session_create_failed', 'transport')->because('threw ' . Event::shortClassName($sweep_exception)),
+    Event::of('checkout.hosted.redirected', array('order_status' => '1'))->about($sweep_correlation),
+    Event::of('payment.succeeded', array('payment_status' => 'succeeded', 'order_updated' => true))->about($sweep_correlation),
+    Event::failure('payment.failed', 'expired', array('session_status' => 'expired', 'order_status' => '7'))->about($sweep_correlation),
+    Event::of('order.marked_paid', array('source' => 'webhook', 'target_status' => '5'))->about($sweep_correlation),
+    Event::of('refund.succeeded', array('is_partial' => true, 'has_reason' => true, 'has_refund_id' => true))->about($sweep_correlation),
+    Event::failure('refund.failed', 'transport', array('has_reason' => true), $sweep_exception)->about($sweep_correlation),
+    Event::of('webhook.received', array('duplicate' => false, 'type' => 'checkout_session.completed')),
+    Event::of('webhook.skipped', array('webhook' => 'signature', 'reason' => 'webhook_secret_not_configured')),
+    Event::failure('webhook.unresolved', 'order_not_found', array('http_status' => 200, 'has_metadata' => true))->about($sweep_correlation),
+    Event::of('connection.validated', array('source' => 'settings_save', 'ok' => true, 'environment' => 'production', 'api_key_mode' => 'live')),
+    Event::sessionStarted('dbg_9f2a1c4e', 'production', 1700003600),
+    Event::sessionStopped('dbg_9f2a1c4e', 'merchant_stopped', 42, 0),
+    Event::environmentSnapshot(array('plugin_version' => '1.0.6', 'oc_version' => '3.0.3.8', 'php_version' => '8.1.27', 'theme_name' => 'Θέμα Ελλάδα', 'theme_version' => '3.1.1', 'is_multistore' => false, 'is_ssl' => true)),
+    Event::environmentConfiguration(array('checkout_mode' => 'hosted', 'order_status' => '5', 'google_pay' => true, 'connection_environment' => 'production', 'api_key_mode' => 'live', 'store_currency' => 'EUR')),
+    Event::fatal('Allowed memory size of 134217728 bytes exhausted (tried to allocate 20480 bytes)', '/var/www/oc/system/library/db.php', 12, E_ERROR)
+);
+
+foreach (Event::environmentPlugins(array('payment.paypercut' => '1.0.6', 'theme.journal3' => '3.1.1', 'module.ocfilter' => '4.2.1')) as $chunk) {
+    $clean[] = $chunk;
+}
+
+$falsely_denied = array();
+
+foreach ($clean as $clean_event) {
+    $clean_envelope = $clean_event->envelope(0);
+
+    if (EventQueue::screen($clean_envelope, $store_secrets)) {
+        $falsely_denied[] = $clean_envelope['event'];
+    }
+}
+
+same('every realistic event still delivers', array(), $falsely_denied);
+check('the false-denial sweep covered the catalogue', count($clean) >= 20);
 
 // --- Named constructors are the boundary ------------------------------------
 
@@ -614,8 +830,26 @@ check(
 // controller answers the panel's AJAX with the permission page.
 foreach (array('telemetryStart', 'telemetryStop', 'telemetryStatus') as $action) {
     check('the permitted controller exposes ' . $action, strpos($admin_source, 'public function ' . $action . '(') !== false);
-    check('the panel links the permitted route for ' . $action, strpos($telemetry_source, "'extension/payment/paypercut/" . $action . "'") !== false);
+    check(
+        'the panel links the permitted route for ' . $action,
+        strpos($telemetry_source, "'index.php?route=extension/payment/paypercut/" . $action . "'") !== false
+    );
 }
+
+// Url::link() HTML-escapes the separator to `&amp;`, and the template drops
+// these straight into a JS string literal, so the server would see a parameter
+// named `amp;user_token` and startup/login would answer with the login page.
+check(
+    'the panel does not build its AJAX urls through url->link',
+    !preg_match('/url->link\(\s*.extension\/payment\/paypercut\/telemetry/', $telemetry_source)
+);
+
+parse_str(
+    (string)parse_url('index.php?route=extension/payment/paypercut/telemetryStart' . '&user_token=' . rawurlencode('abc123'), PHP_URL_QUERY),
+    $panel_query
+);
+
+same('the panel url carries a readable user_token', 'abc123', isset($panel_query['user_token']) ? $panel_query['user_token'] : '');
 
 foreach (array('start', 'stop', 'status') as $action) {
     check(

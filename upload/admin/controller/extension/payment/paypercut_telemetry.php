@@ -60,11 +60,16 @@ class ControllerExtensionPaymentPaypercutTelemetry extends Controller
         $data['poll_seconds'] = TelemetrySession::POLL_INTERVAL_SECONDS;
         $data['log_max_entries'] = SentLog::MAX_ENTRIES;
         $data['user_token'] = $this->session->data['user_token'];
-        // Routed through the paypercut controller: OpenCart permits by the third
-        // path segment, and only `extension/payment/paypercut` is granted.
-        $data['start_url'] = $this->url->link('extension/payment/paypercut/telemetryStart', 'user_token=' . $this->session->data['user_token'], true);
-        $data['stop_url'] = $this->url->link('extension/payment/paypercut/telemetryStop', 'user_token=' . $this->session->data['user_token'], true);
-        $data['status_url'] = $this->url->link('extension/payment/paypercut/telemetryStatus', 'user_token=' . $this->session->data['user_token'], true);
+        // Built by hand, not via url->link(): OpenCart 3's Url::link HTML-escapes
+        // the separator to `&amp;`, and the template drops these into a JS string
+        // literal, so the token would arrive as a parameter named `amp;user_token`.
+        // Routed through the paypercut controller because OpenCart permits by the
+        // third path segment, and only `extension/payment/paypercut` is granted.
+        $query = '&user_token=' . rawurlencode((string)$this->session->data['user_token']);
+
+        $data['start_url'] = 'index.php?route=extension/payment/paypercut/telemetryStart' . $query;
+        $data['stop_url'] = 'index.php?route=extension/payment/paypercut/telemetryStop' . $query;
+        $data['status_url'] = 'index.php?route=extension/payment/paypercut/telemetryStatus' . $query;
 
         $entries = SentLog::all();
         $data['log_entries'] = array();
