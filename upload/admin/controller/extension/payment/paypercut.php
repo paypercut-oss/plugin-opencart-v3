@@ -239,6 +239,18 @@ class ControllerExtensionPaymentPaypercut extends Controller
             }
         }
 
+        // Reaped first: a saved API key or environment change ends the session
+        // here, and an event buffered before that would only be persisted after
+        // the teardown that was meant to leave nothing behind.
+        TelemetrySession::flushMemo();
+        TelemetrySession::reap();
+
+        if (!TelemetrySession::isActiveFast()) {
+            return;
+        }
+
+        Bootstrap::loadAdmin();
+
         EventRecorder::record(
             Event::of(
                 'connection.validated',
@@ -253,14 +265,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
         // A session opened with one configuration snapshot; without this, a
         // setting changed mid-session is read against the snapshot taken before
         // it and the timeline lies.
-        TelemetrySession::flushMemo();
-        TelemetrySession::reap();
-
-        if (TelemetrySession::isActiveFast()) {
-            Bootstrap::loadAdmin();
-
-            EventRecorder::record(Event::environmentConfiguration(\Paypercut\Telemetry\EnvironmentSnapshot::values()));
-        }
+        EventRecorder::record(Event::environmentConfiguration(\Paypercut\Telemetry\EnvironmentSnapshot::values()));
     }
 
     /**
