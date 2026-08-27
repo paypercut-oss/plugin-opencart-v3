@@ -225,6 +225,29 @@ class ControllerExtensionPaymentPaypercut extends Controller
     }
 
     /**
+     * The debug-session endpoints the panel calls.
+     *
+     * They live on this controller rather than on paypercut_telemetry because
+     * OpenCart derives the permission route from the third path segment: only
+     * `extension/payment/paypercut` is granted at install, so an action on any
+     * other controller answers the panel's AJAX with the permission page.
+     */
+    public function telemetryStart()
+    {
+        $this->load->controller('extension/payment/paypercut_telemetry/start');
+    }
+
+    public function telemetryStop()
+    {
+        $this->load->controller('extension/payment/paypercut_telemetry/stop');
+    }
+
+    public function telemetryStatus()
+    {
+        $this->load->controller('extension/payment/paypercut_telemetry/status');
+    }
+
+    /**
      * Follow a settings save through: the record may now describe a connection
      * the store no longer has, and a live session's configuration snapshot is
      * out of date the moment a setting changes.

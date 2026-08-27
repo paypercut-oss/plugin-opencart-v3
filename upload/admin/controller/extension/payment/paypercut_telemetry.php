@@ -60,9 +60,11 @@ class ControllerExtensionPaymentPaypercutTelemetry extends Controller
         $data['poll_seconds'] = TelemetrySession::POLL_INTERVAL_SECONDS;
         $data['log_max_entries'] = SentLog::MAX_ENTRIES;
         $data['user_token'] = $this->session->data['user_token'];
-        $data['start_url'] = $this->url->link('extension/payment/paypercut_telemetry/start', 'user_token=' . $this->session->data['user_token'], true);
-        $data['stop_url'] = $this->url->link('extension/payment/paypercut_telemetry/stop', 'user_token=' . $this->session->data['user_token'], true);
-        $data['status_url'] = $this->url->link('extension/payment/paypercut_telemetry/status', 'user_token=' . $this->session->data['user_token'], true);
+        // Routed through the paypercut controller: OpenCart permits by the third
+        // path segment, and only `extension/payment/paypercut` is granted.
+        $data['start_url'] = $this->url->link('extension/payment/paypercut/telemetryStart', 'user_token=' . $this->session->data['user_token'], true);
+        $data['stop_url'] = $this->url->link('extension/payment/paypercut/telemetryStop', 'user_token=' . $this->session->data['user_token'], true);
+        $data['status_url'] = $this->url->link('extension/payment/paypercut/telemetryStatus', 'user_token=' . $this->session->data['user_token'], true);
 
         $entries = SentLog::all();
         $data['log_entries'] = array();

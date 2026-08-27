@@ -41,7 +41,7 @@
     <p><strong>{{ text_telemetry_ended_lead }}</strong> {{ text_telemetry_ended_help }}</p>
     <p>
       {{ text_telemetry_last_session_id }}
-      <code data-paypercut-session-id>{{ session_id }}</code>
+      <code data-paypercut-session-id>{{ session_id|escape }}</code>
       <button type="button" class="btn btn-link btn-xs" data-paypercut-copy>{{ button_telemetry_copy }}</button>
       <span class="help-block">{{ text_telemetry_quote_it }}</span>
     </p>
@@ -147,7 +147,7 @@
     };
 
     var state = {
-        state: '{{ state }}',
+        state: '{{ state|e('js') }}',
         session_id: '{{ session_id|e('js') }}',
         expires_at: {{ expires_at }},
         events_sent: {{ events_sent }},
