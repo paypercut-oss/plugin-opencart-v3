@@ -26,6 +26,18 @@ A merchant can start a time-boxed diagnostic feed from the **Debug Session** tab
 It is off by default and ends by itself after about an hour. What it sends, what
 it never sends, and the full event catalogue: [`docs/telemetry.md`](docs/telemetry.md).
 
+## Tests
+
+```bash
+php tests/run.php
+```
+
+Dependency-free — no OpenCart bootstrap, no database. It pins the environment
+host pairing, the telemetry deny assertion, the queue bounds and the flusher's
+decision table. CI (`.github/workflows/tests.yml`) lints every PHP file and runs
+it on each push and pull request. The payment paths have no automated coverage;
+smoke-test those on the hosted dev store.
+
 ## Maintainers
 
 Operational procedures (release, install/upgrade, incident response) live in
