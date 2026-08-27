@@ -175,9 +175,14 @@ module authored.
 rather than merely clamping them: the webhook route accepts an unsigned delivery
 whenever no webhook secret is configured, so `payment_id`, `payment_intent_id`
 and `order_ref` are all attacker-controlled on that path. Clamped free text let
-a script tag, a URL and an RTL override travel under `order_ref`. The bound is
-lossless here — every call site passes `(string)$order_id`, the numeric primary
-key of `oc_order`.
+a script tag, a URL and an RTL override travel under `order_ref`. The charset
+admits no slash, so `../../etc/passwd` is dropped, and it requires at least one
+alphanumeric, so `..` is too. The bound is lossless here — every call site
+passes `(string)$order_id`, the numeric primary key of `oc_order`.
+
+A bad correlation id drops the **field** and still sends the event; bad `attrs`
+or error text drops the whole event. That asymmetry is deliberate: a
+correlation id is a join key, and losing it costs less than losing the event.
 
 The deny assertion in `EventQueue::append()` is the last gate. It drops the
 **whole event**, not the offending field: an event that trips it was assembled
@@ -194,21 +199,44 @@ added to the wire shape later is covered without anyone remembering to list it,
 and `tests/run.php` poisons every leaf **and every key** of a fully populated
 envelope to keep it that way.
 
-Four details make "every value" literal. Non-string scalars are cast before
-they are screened, because an int carries a PAN as happily as a string does.
-A structure nested deeper than the wire contract, or a leaf that is not a scalar
-at all, is denied rather than stepped over — a value this gate cannot read is
-not a value it may assume safe. And `Event::text()` screens the value it was
-given **before** it clamps to `MAX_TEXT_BYTES`, returning a marker the gate
-denies: a PAN starting at byte 241 otherwise survives a 256-byte cut as 15 of
-16 digits, and 15 digits Luhn-complete to exactly one card. The per-secret
-fragment match still covers a store credential cut by that same clamp.
+Four details make "every value" literal. A non-string scalar is screened in
+**every form it can ship as** — the plain cast and `json_encode`'s rendering —
+because an int carries a PAN as happily as a string does, and `(string)` prints
+a float as precision-14 scientific notation while `json_encode`, the serialiser
+actually on the wire, prints all 16 digits. A structure nested deeper than the
+wire contract, or a leaf that is not a scalar at all, is denied rather than
+stepped over — a value this gate cannot read is not a value it may assume safe.
+And `Event::text()` screens the value it was given **before** it clamps to
+`MAX_TEXT_BYTES`, returning a marker the gate denies: a PAN starting at byte 241
+otherwise survives a 256-byte cut as 15 of 16 digits, and 15 digits
+Luhn-complete to exactly one card.
+
+The per-secret match is position-independent in both operands: any run of
+`MIN_SECRET_FRAGMENT` bytes of a store credential, taken from anywhere in it,
+denies the value wherever it sits. Comparing the value's tail against the
+secret's head covered only the byte clamp, and a middle slice of an API key is
+as reusable as the whole.
 
 The card-number check slides across a run of digits instead of anchoring to its
 start, so `'0000' . $pan` and a PAN concatenated to a reference are both caught.
 Each window has to carry an issuer prefix at a length that issuer actually uses:
-accepting any Luhn-valid 13-19 digit window would deny a random 20-digit run
-about 96% of the time, and a false denial drops a whole event.
+accepting any Luhn-valid 13-19 digit window denies a random 16-digit identifier
+about 67% of the time (measured, 3,000 samples) where the issuer gate denies
+8.2%, and a false denial drops a whole event.
+
+Separators are handled in two passes. Space and hyphen may break any digit run.
+Dot, comma, slash, underscore and NBSP are read only inside a card's own
+grouping — 4-4-4-4(-3) or the Amex/Diners 4-6-5, one separator throughout —
+because `4111.1111.1111.1111` is a whole card, but accepting those separators in
+any digit run read `ids 1010,2021,3032,4043,5054` as a PAN 43% of the time.
+
+`DENIED_KEY_PATTERN` is segment-anchored, and everything but the
+`secret`/`password`/`credential` group only matches in final position. The
+inventory event carries store extension codes as **keys**, and a bare `auth`
+substring binned the whole chunk — 14 entries — on any store running
+`payment.authorizenet_aim`. `api_key`, `x-api-key`, `access_token` and
+`nonce` are still denied; `api_key_mode`, `payment.authorizenet_aim`,
+`module.oauth_login` and `payment.nonce_pay` are not.
 
 The admin user who started a session is kept in the local record for the banner
 but is deliberately absent from `session.started`: a store-user identifier is not
@@ -226,7 +254,11 @@ delegations to `paypercut_telemetry`, and they have to live on the `paypercut`
 controller: OpenCart 3 derives the permission route from the third path segment
 (`admin/controller/startup/permission.php`), and installing the extension grants
 `extension/payment/paypercut` only — an action on any other controller answers
-the panel's AJAX with the permission page instead of JSON. A storefront request does exactly two things — read
+the panel's AJAX with the permission page instead of JSON. Their query strings
+are built by hand rather than through `url->link()`, which HTML-escapes the
+separator to `&amp;`: the template drops these URLs into a JS string literal, so
+the token would arrive as a parameter named `amp;user_token` and every call
+would answer with the login page. A storefront request does exactly two things — read
 the "is a session live" setting, and, if it is, make one buffered queue write at
 shutdown.
 

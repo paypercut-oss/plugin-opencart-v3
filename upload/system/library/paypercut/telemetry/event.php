@@ -45,8 +45,12 @@ class Event
 
     /**
      * Field names that must never appear in an event, whatever their value.
+     *
+     * Segment-anchored, and the second group only in final position: the
+     * inventory event carries store extension codes as KEYS, and a bare `auth`
+     * substring bins the whole chunk on any store running authorizenet_aim.
      */
-    const DENIED_KEY_PATTERN = '/secret|token|password|credential|nonce|auth|_key$/i';
+    const DENIED_KEY_PATTERN = '/(?:\A|[^A-Za-z0-9])(?:secrets?|passwords?|passwd|credentials?|privatekey)(?:\z|[^A-Za-z0-9])|(?:\A|[^A-Za-z0-9])(?:tokens?|nonces?|auth|authorizations?|authorisations?|keys?|apikeys?|jwt|bearer|signatures?)\z/i';
 
     /**
      * Value shapes that must never appear, whatever their field name.
@@ -67,6 +71,19 @@ class Event
      * denies, dropping the whole event exactly as any other denial does.
      */
     const DENIED_MARKER = '[paypercut:denied]';
+
+    /**
+     * A digit run for the sliding PAN scan: space and hyphen may break it.
+     */
+    const CARD_RUN_PATTERN = '/\d(?:[ -]?\d)+/';
+
+    /**
+     * A card written in its own grouping with some other separator.
+     *
+     * 4-4-4-4(-3) and the Amex/Diners 4-6-5 form, with one separator used
+     * throughout — the shapes a human writes a card in, and few others.
+     */
+    const GROUPED_CARD_PATTERN = '/\d{4}([.,\/_]|\xC2\xA0)\d{4}(?:\1\d{4}){2,}(?:\1\d{1,3})?|\d{4}([.,\/_]|\xC2\xA0)\d{6}\2\d{4,5}/';
 
     /**
      * Card-network prefixes and the PAN lengths each one issues.
@@ -473,14 +490,45 @@ class Event
                 return true;
             }
 
-            // Cast rather than string-tested: an int carries a PAN as happily
-            // as a string does, and `attrs` passes non-string scalars through.
-            if (self::deniedValue((string)$value, $secrets)) {
-                return true;
+            // Every form it can ship as, not just (string): that cast prints a
+            // float in scientific notation, json_encode prints all 16 digits.
+            foreach (self::scalarForms($value) as $form) {
+                if (self::deniedValue($form, $secrets)) {
+                    return true;
+                }
             }
         }
 
         return false;
+    }
+
+    /**
+     * Every textual form a scalar can reach the wire as.
+     *
+     * json_encode is the serialiser the flusher actually uses, so its rendering
+     * of a value is the one that has to be screened alongside the plain cast.
+     */
+    private static function scalarForms($value)
+    {
+        $forms = array((string)$value);
+
+        if (is_int($value) || is_float($value) || is_bool($value)) {
+            $json = json_encode($value);
+
+            if (is_string($json) && $json !== '' && !in_array($json, $forms, true)) {
+                $forms[] = $json;
+            }
+        }
+
+        if (is_float($value) && is_finite($value) && abs($value) < 1.0e+21) {
+            $plain = rtrim(rtrim(sprintf('%.6F', $value), '0'), '.');
+
+            if ($plain !== '' && !in_array($plain, $forms, true)) {
+                $forms[] = $plain;
+            }
+        }
+
+        return $forms;
     }
 
     /**
@@ -517,7 +565,7 @@ class Event
                 continue;
             }
 
-            if (strpos($text, $secret) !== false || self::endsWithFragmentOf($text, $secret)) {
+            if (strpos($text, $secret) !== false || self::carriesFragmentOf($text, $secret)) {
                 return true;
             }
         }
@@ -526,19 +574,22 @@ class Event
     }
 
     /**
-     * True when this value ends in the opening bytes of a secret.
+     * True when any run of a secret long enough to matter appears anywhere.
      *
-     * text() screens the shapes it can recognise before it clamps, but it has no
-     * access to the store's credentials, so a secret of no known format
-     * straddling the byte budget still reaches this gate as its own leading
-     * fragment. Matching the cut restores the comparison the clamp took away.
+     * Position-independent in both operands: comparing the value's tail against
+     * the secret's head caught the clamp but let a middle slice of the store's
+     * API key travel, and a slice is as reusable as the whole.
      */
-    private static function endsWithFragmentOf($value, $secret)
+    private static function carriesFragmentOf($value, $secret)
     {
-        $longest = min(strlen($value), strlen($secret) - 1);
+        $length = strlen($secret);
 
-        for ($length = $longest; $length >= self::MIN_SECRET_FRAGMENT; $length--) {
-            if (substr($value, -$length) === substr($secret, 0, $length)) {
+        if ($length < self::MIN_SECRET_FRAGMENT) {
+            return false;
+        }
+
+        for ($offset = 0; $offset + self::MIN_SECRET_FRAGMENT <= $length; $offset++) {
+            if (strpos($value, substr($secret, $offset, self::MIN_SECRET_FRAGMENT)) !== false) {
                 return true;
             }
         }
@@ -559,7 +610,20 @@ class Event
      */
     public static function containsCardNumber($value)
     {
-        if (!preg_match_all('/\d(?:[ -]?\d)+/', (string)$value, $matches)) {
+        $value = (string)$value;
+
+        // Space and hyphen may break any digit run; the other separators only
+        // inside a card's grouping — anywhere read an id list as a PAN 43% of the time.
+        return self::scanRuns(self::CARD_RUN_PATTERN, $value)
+            || self::scanRuns(self::GROUPED_CARD_PATTERN, $value);
+    }
+
+    /**
+     * Every digit run this pattern finds, punctuation stripped, slid over.
+     */
+    private static function scanRuns($pattern, $value)
+    {
+        if (!preg_match_all($pattern, $value, $matches)) {
             return false;
         }
 
@@ -665,7 +729,9 @@ class Event
      */
     public static function identifier($value)
     {
-        return preg_match('/^[A-Za-z0-9_.:-]{1,64}\z/D', (string)$value) ? (string)$value : '';
+        // At least one alphanumeric: '..' is charset-legal but names nothing,
+        // and a correlation id that joins to no record is not worth carrying.
+        return preg_match('/^(?=[A-Za-z0-9_.:-]*[A-Za-z0-9])[A-Za-z0-9_.:-]{1,64}\z/D', (string)$value) ? (string)$value : '';
     }
 
     /**

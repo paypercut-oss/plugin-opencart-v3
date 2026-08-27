@@ -425,12 +425,110 @@ foreach ($not_cards as $value) {
     check('not a card number: ' . $value, !Event::containsCardNumber($value));
 }
 
+// --- A PAN that is not a string ---------------------------------------------
+
+// json_encode is the serialiser on the wire, and it prints a float that
+// (string) renders as precision-14 scientific notation in full.
+$scalar_pans = array(
+    'int' => 4111111111111111,
+    'float' => (float)4111111111111111,
+    'amex int' => 378282246310005,
+    'amex float' => (float)378282246310005,
+    'string' => '4111111111111111'
+);
+
+foreach ($scalar_pans as $label => $scalar_pan) {
+    check(
+        'a PAN as a ' . $label . ' is denied',
+        EventQueue::screen(Event::of('webhook.received', array('webhook' => $scalar_pan))->envelope(0), $store_secrets)
+    );
+}
+
+$benign_scalars = array('http_status' => 402, 'duration_ms' => 5312, 'amount' => 129.99, 'is_ssl' => true, 'expires_at' => 1787250271);
+
+check(
+    'benign non-string scalars still deliver',
+    !EventQueue::screen(Event::of('api.request_slow', $benign_scalars)->envelope(0), $store_secrets)
+);
+
+// --- Separators other than space and hyphen ---------------------------------
+
+foreach (array('.', '/', ',', '_', "\xC2\xA0") as $separator) {
+    check(
+        'a PAN grouped with ' . json_encode($separator) . ' is denied',
+        Event::containsCardNumber('4111' . $separator . '1111' . $separator . '1111' . $separator . '1111')
+    );
+}
+
+check('an Amex grouped 4-6-5 with dots is denied', Event::containsCardNumber('3782.822463.10005'));
+
+// Widening the separator class over any digit run read a comma-separated id
+// list as a PAN 43% of the time; card grouping is what earns the wider class.
+foreach (array('ids 1010,2021,3032,4043,5054', 'catalog/view/theme/1234/5678/9012', '1.2.3.4', '2026.08.27 12:34:56.789', 'rows 1,234,567 scanned') as $value) {
+    check('not a card number: ' . $value, !Event::containsCardNumber($value));
+}
+
+// --- A secret fragment, wherever it sits ------------------------------------
+
+// Comparing the value's tail against the secret's head caught the byte clamp
+// and nothing else: a middle slice is as reusable as the whole key.
+foreach ($store_secrets as $index => $secret) {
+    foreach (array(0, 4, 8) as $offset) {
+        if ($offset + 8 > strlen($secret)) {
+            continue;
+        }
+
+        check(
+            'a slice of secret ' . $index . ' at offset ' . $offset . ' is denied',
+            EventQueue::screen(Event::of('t')->because('frame ' . substr($secret, $offset, 8) . ' at line 12')->envelope(0), $store_secrets)
+        );
+    }
+}
+
+// --- The extension inventory survives its own key names ---------------------
+
+// Stock OpenCart 3 ships payment.authorizenet_aim; an unanchored `auth` binned
+// the whole chunk, losing 14 entries from the one event support compares.
+$inventory = array();
+
+foreach (array('alipay', 'authorizenet_aim', 'authorizenet_sim', 'bank_transfer', 'cardconnect', 'cheque', 'cod', 'eway', 'firstdata', 'klarna_account', 'nonce_pay', 'oauth_login', 'paypercut', 'sagepay_direct', 'skrill', 'tokenex_gateway', 'worldpay') as $code) {
+    $inventory['payment.' . $code] = '1.0';
+}
+
+$inventory['module.oauth_login'] = '2.3.1';
+
+$inventory_keys = array();
+
+foreach (Event::environmentPlugins($inventory) as $inventory_chunk) {
+    $inventory_envelope = $inventory_chunk->envelope(0);
+
+    check('an inventory chunk is not denied by its own extension codes', !EventQueue::screen($inventory_envelope, $store_secrets));
+
+    foreach ($inventory_envelope['attrs'] as $inventory_key => $inventory_version) {
+        $inventory_keys[$inventory_key] = true;
+    }
+}
+
+foreach (array_keys($inventory) as $inventory_code) {
+    check('the inventory reports ' . $inventory_code, isset($inventory_keys[$inventory_code]));
+}
+
+// Names that really do announce a credential must stay denied.
+foreach (array('api_key', 'x-api-key', 'apikey', 'webhook_secret', 'access_token', 'user_token', 'nonce', 'Authorization', 'password', 'credentials', 'client_secret', 'jwt', 'bearer', 'signature', 'private_key') as $denied_key) {
+    check('a credential field name is denied: ' . $denied_key, EventQueue::screen(array('event' => 't', $denied_key => 'x')));
+}
+
+// ...while the fields this module really reports must not be.
+foreach (array('api_key_mode', 'plugin_version', 'checkout_mode', 'connection_environment', 'statement_descriptor_set', 'payment_method_config_set', 'webhook_configured', 'store_currency', 'trace_id', 'session_id') as $reported_key) {
+    check('a reported field name is not denied: ' . $reported_key, !EventQueue::screen(array('event' => 't', $reported_key => 'x')));
+}
+
 // --- Correlation ids are identifier-bounded ---------------------------------
 
 // order_ref used to be clamped free text. On the webhook path the body is
 // unsigned whenever no secret is configured, so 256 bytes of anything reached
 // the wire under a correlation field.
-$hostile_refs = array('<script>x</script>', 'https://evil.example.com/a', "0'; DROP--", "\xE2\x80\xAEtxet", 'jane@example.com', str_repeat('a', 65));
+$hostile_refs = array('<script>x</script>', 'https://evil.example.com/a', "0'; DROP--", "\xE2\x80\xAEtxet", 'jane@example.com', str_repeat('a', 65), '../../etc/passwd', '..', '...', '-');
 
 foreach ($hostile_refs as $index => $value) {
     $ref_case = Event::of('webhook.received')
