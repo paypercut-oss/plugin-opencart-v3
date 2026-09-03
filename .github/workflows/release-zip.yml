@@ -46,7 +46,7 @@ jobs:
           if xml_version != tag_version:
               errors.append(f"install.xml version is '{xml_version}', expected '{tag_version}'")
 
-          content = Path("upload/catalog/controller/extension/payment/paypercut.php").read_text(encoding="utf-8")
+          content = Path("upload/system/library/paypercut/version.php").read_text(encoding="utf-8")
           m = re.search(r"define\('PAYPERCUT_PLUGIN_VERSION', '([^']*)'\)", content)
           found = m.group(1) if m else "not found"
           if found != tag_version:
@@ -116,6 +116,7 @@ jobs:
             --exclude ".idea/" \
             --exclude ".vscode/" \
             --exclude "internal/" \
+            --exclude "tests/" \
             --exclude "dist/" \
             --exclude ".gitignore" \
             --exclude ".DS_Store"

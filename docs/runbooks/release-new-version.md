@@ -15,8 +15,10 @@
 - Write access to `paypercut-oss/plugin-opencart-v3`.
 - `main` is green and contains every change intended for the release.
 - A version number chosen per [semver](https://semver.org). The current version
-  is tracked in [install.xml](../../install.xml) and is rewritten by the release
-  workflow from the tag.
+  is tracked in [install.xml](../../install.xml) and in
+  [`upload/system/library/paypercut/version.php`](../../upload/system/library/paypercut/version.php);
+  the workflow refuses a tag that disagrees with either, and rewrites the XML
+  from the tag.
 
 ## Procedure
 

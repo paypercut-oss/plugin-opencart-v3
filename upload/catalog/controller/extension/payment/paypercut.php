@@ -1,8 +1,73 @@
 <?php
-define('PAYPERCUT_PLUGIN_VERSION', '1.0.6');
+
+use Paypercut\Support\Environment;
+use Paypercut\Telemetry\Bootstrap;
+use Paypercut\Telemetry\Event;
+use Paypercut\Telemetry\EventRecorder;
 
 class ControllerExtensionPaymentPaypercut extends Controller
 {
+    public function __construct($registry)
+    {
+        parent::__construct($registry);
+
+        require_once DIR_SYSTEM . 'library/paypercut/bootstrap.php';
+
+        Bootstrap::boot($registry);
+    }
+
+    /**
+     * Resolve a Paypercut API endpoint for the store's chosen environment.
+     */
+    private function apiUrl($path)
+    {
+        return Environment::apiBaseUri((string)$this->config->get('payment_paypercut_environment')) . $path;
+    }
+
+    /**
+     * Report what an API call did, without ever putting the response on the wire.
+     */
+    private function reportApiResult($context, $http_code, $response, $duration_ms, $method = 'POST')
+    {
+        $http_code = (int)$http_code;
+
+        if ($http_code === 0) {
+            EventRecorder::record(
+                Event::failure('api.request_failed', 'transport', array('api_context' => $context, 'duration_ms' => $duration_ms))
+            );
+
+            return;
+        }
+
+        if ($http_code >= 400) {
+            $decoded = json_decode((string)$response, true);
+
+            if (is_array($decoded)) {
+                EventRecorder::record(
+                    Event::apiFailure('api.request_failed', $http_code, $decoded, array('api_context' => $context, 'duration_ms' => $duration_ms))
+                );
+            } else {
+                EventRecorder::record(
+                    Event::failure(
+                        'api.request_failed',
+                        'http_' . $http_code,
+                        array('api_context' => $context, 'http_status' => $http_code, 'body_parsable' => false, 'duration_ms' => $duration_ms)
+                    )
+                );
+            }
+
+            return;
+        }
+
+        // Only slow calls are timed as events: timing every call would fill the
+        // queue with the requests nobody is investigating.
+        if ($duration_ms >= \Paypercut\Telemetry\TelemetrySession::SLOW_REQUEST_MS) {
+            EventRecorder::record(
+                Event::of('api.request_slow', array('api_context' => $context, 'method' => $method, 'duration_ms' => $duration_ms))
+            );
+        }
+    }
+
     public function index()
     {
         $this->load->language('extension/payment/paypercut');
@@ -65,18 +130,34 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
         // For embedded mode, create checkout session immediately
         if ($checkout_mode === 'embedded') {
+            $order_ref = isset($this->session->data['order_id']) ? (string)$this->session->data['order_id'] : '';
+
             try {
                 $checkout_data = $this->createCheckoutSession();
                 if (isset($checkout_data['checkout_id'])) {
                     $data['checkout_id'] = $checkout_data['checkout_id'];
                     // Store checkout_id in session for later verification
                     $this->session->data['paypercut_checkout_id'] = $checkout_data['checkout_id'];
+
+                    EventRecorder::record(
+                        Event::of('checkout.embedded.session_created')->about(
+                            array('payment_intent_id' => $checkout_data['checkout_id'], 'order_ref' => $order_ref)
+                        )
+                    );
                 } else {
                     $data['checkout_error'] = 'Failed to initialize payment form';
+
+                    EventRecorder::record(
+                        Event::failure('checkout.embedded.create_failed', 'no_session_id')->about(array('order_ref' => $order_ref))
+                    );
                 }
             } catch (Exception $e) {
                 $this->logError('Failed to create embedded checkout: ' . $e->getMessage());
                 $data['checkout_error'] = 'Failed to initialize payment form';
+
+                EventRecorder::record(
+                    Event::failure('checkout.embedded.create_failed', 'session_create', array(), $e)->about(array('order_ref' => $order_ref))
+                );
             }
         }
 
@@ -88,7 +169,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
     private function getPaymentMethodsFromConfig($config_id)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/payment-configs/' . $config_id;
+        $api_url = $this->apiUrl('v1/payment-configs/' . $config_id);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -215,6 +296,14 @@ class ControllerExtensionPaymentPaypercut extends Controller
             $response = $this->sendPaymentRequest($data);
 
             if (isset($response['error'])) {
+                // Named literally rather than built from the mode, so the
+                // catalogue test can see both names.
+                EventRecorder::record(
+                    $this->config->get('payment_paypercut_checkout_mode') === 'embedded'
+                        ? Event::failure('checkout.embedded.create_failed', 'session_create')->about(array('order_ref' => (string)$order_id))
+                        : Event::failure('checkout.hosted.create_failed', 'session_create')->about(array('order_ref' => (string)$order_id))
+                );
+
                 throw new Exception($response['error']);
             }
 
@@ -224,14 +313,37 @@ class ControllerExtensionPaymentPaypercut extends Controller
                     if (isset($response['checkout_id'])) {
                         $json['checkout_id'] = $response['checkout_id'];
                         $json['mode'] = 'embedded';
+
+                        EventRecorder::record(
+                            Event::of('checkout.embedded.session_created')->about(
+                                array('payment_intent_id' => $response['checkout_id'], 'order_ref' => (string)$order_id)
+                            )
+                        );
                     } else {
+                        EventRecorder::record(
+                            Event::failure('checkout.embedded.create_failed', 'no_session_id')->about(array('order_ref' => (string)$order_id))
+                        );
+
                         throw new Exception($this->language->get('error_checkout'));
                     }
                 } else {
                     // For hosted mode, return redirect URL
                     if (isset($response['payment_url'])) {
                         $json['redirect'] = $response['payment_url'];
+
+                        EventRecorder::record(
+                            Event::of('checkout.hosted.redirected', array('order_status' => (string)$order_info['order_status_id']))->about(
+                                array(
+                                    'payment_id' => isset($response['checkout_id']) ? $response['checkout_id'] : '',
+                                    'order_ref' => (string)$order_id
+                                )
+                            )
+                        );
                     } else {
+                        EventRecorder::record(
+                            Event::failure('checkout.hosted.redirect_missing', 'redirect_absent')->about(array('order_ref' => (string)$order_id))
+                        );
+
                         throw new Exception($this->language->get('error_checkout'));
                     }
                 }
@@ -241,6 +353,12 @@ class ControllerExtensionPaymentPaypercut extends Controller
         } catch (Exception $e) {
             $this->logError('Payment send error: ' . $e->getMessage());
             $json['error'] = $e->getMessage();
+
+            // The exception can carry the API's own prose, which quotes back
+            // whatever was submitted, so only its type travels.
+            EventRecorder::record(
+                Event::failure('checkout.session_create_failed', 'transport')->because('threw ' . Event::shortClassName($e))
+            );
         }
 
         $this->response->addHeader('Content-Type: application/json');
@@ -268,6 +386,10 @@ class ControllerExtensionPaymentPaypercut extends Controller
             $order_info = $this->model_checkout_order->getOrder($order_id);
 
             if (!$order_info) {
+                EventRecorder::record(
+                    Event::failure('checkout.order_missing', 'order_not_found')->about(array('order_ref' => (string)$order_id))
+                );
+
                 throw new Exception('Order not found: ' . $order_id);
             }
 
@@ -334,11 +456,26 @@ class ControllerExtensionPaymentPaypercut extends Controller
             // Clear paypercut-specific session data
             unset($this->session->data['paypercut_checkout_id']);
 
+            EventRecorder::record(
+                Event::of(
+                    'checkout.embedded.order_created',
+                    array(
+                        'order_status' => (string)$order_status_id,
+                        'session_matched' => true,
+                        'verified_status' => (string)$checkout_data['status']
+                    )
+                )->about(array('payment_id' => (string)$payment_id, 'order_ref' => (string)$order_id))
+            );
+
             $json['success'] = true;
             $json['order_id'] = $order_id;
             $json['redirect'] = $this->url->link('checkout/success', '', true);
         } catch (Exception $e) {
             $json['error'] = $e->getMessage();
+
+            EventRecorder::record(
+                Event::failure('checkout.return.unverifiable', 'lookup_failed', array(), $e)
+            );
         }
 
         echo json_encode($json);
@@ -386,6 +523,12 @@ class ControllerExtensionPaymentPaypercut extends Controller
                 $payment_data = $this->verifyPayment($payment_id);
 
                 if (!$payment_data || !is_array($payment_data)) {
+                    EventRecorder::record(
+                        Event::failure('checkout.return.unverifiable', 'no_payment_status')->about(
+                            array('payment_id' => (string)$payment_id, 'order_ref' => (string)$order_id)
+                        )
+                    );
+
                     throw new Exception('Unable to verify payment status');
                 }
 
@@ -400,6 +543,8 @@ class ControllerExtensionPaymentPaypercut extends Controller
                 );
 
                 // Handle different payment statuses
+                $correlation = array('payment_id' => (string)$payment_id, 'order_ref' => (string)$order_id);
+
                 switch ($payment_status) {
                     case 'succeeded':
                         $comment = 'Payment completed via Paypercut' . PHP_EOL;
@@ -417,6 +562,19 @@ class ControllerExtensionPaymentPaypercut extends Controller
                             true
                         );
 
+                        EventRecorder::record(
+                            Event::of('payment.succeeded', array('payment_status' => (string)$payment_status, 'order_updated' => true))->about($correlation)
+                        );
+                        EventRecorder::record(
+                            Event::of(
+                                'order.marked_paid',
+                                array(
+                                    'source' => 'return',
+                                    'target_status' => (string)$this->config->get('payment_paypercut_order_status_id')
+                                )
+                            )->about($correlation)
+                        );
+
                         $this->response->redirect($this->url->link('extension/payment/paypercut/success', '', true));
                         break;
 
@@ -427,6 +585,14 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
                         $order_status_id = $this->getOrderStatusForPaymentStatus('pending');
                         $this->model_checkout_order->addOrderHistory($order_id, $order_status_id, $comment, false);
+
+                        EventRecorder::record(
+                            Event::of(
+                                'checkout.return.pending',
+                                array('payment_status' => (string)$payment_status, 'order_status' => (string)$order_status_id)
+                            )->about($correlation)
+                        );
+
                         $this->response->redirect($this->url->link('extension/payment/paypercut/pending', '', true));
                         break;
 
@@ -438,11 +604,33 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
                         $order_status_id = $this->getOrderStatusForPaymentStatus('failed');
                         $this->model_checkout_order->addOrderHistory($order_id, $order_status_id, $comment, false);
+
+                        // The failure reason the platform returned is not
+                        // repeated: only the status this store acted on.
+                        EventRecorder::record(
+                            Event::failure('payment.failed', Event::identifier((string)$payment_status) ?: 'unknown', array('payment_status' => (string)$payment_status, 'order_updated' => true))->about($correlation)
+                        );
+                        EventRecorder::record(
+                            Event::of(
+                                'order.marked_failed',
+                                array('source' => 'return', 'payment_status' => (string)$payment_status, 'to_status' => (string)$order_status_id)
+                            )->about($correlation)
+                        );
+
                         $this->response->redirect($this->url->link('extension/payment/paypercut/failure', '', true));
                         break;
 
                     default:
                         $this->logError('Unknown payment status: ' . $payment_status);
+
+                        EventRecorder::record(
+                            Event::failure(
+                                'order.status_unhandled',
+                                'unknown_payment_status',
+                                array('source' => 'return', 'payment_status' => (string)$payment_status)
+                            )->about($correlation)
+                        );
+
                         $this->response->redirect($this->url->link('extension/payment/paypercut/pending', '', true));
                 }
             } else {
@@ -450,6 +638,9 @@ class ControllerExtensionPaymentPaypercut extends Controller
             }
         } catch (Exception $e) {
             $this->logError('Callback error: ' . $e->getMessage());
+
+            EventRecorder::record(Event::failure('checkout.return.unverifiable', 'lookup_failed', array(), $e));
+
             $this->response->redirect($this->url->link('extension/payment/paypercut/failure', '', true));
         }
     }
@@ -470,6 +661,10 @@ class ControllerExtensionPaymentPaypercut extends Controller
             $order_info = $this->model_checkout_order->getOrder($order_id);
 
             if (!$order_info) {
+                EventRecorder::record(
+                    Event::failure('checkout.order_missing', 'order_not_found')->about(array('order_ref' => (string)$order_id))
+                );
+
                 throw new Exception('Order not found: ' . $order_id);
             }
 
@@ -560,20 +755,57 @@ class ControllerExtensionPaymentPaypercut extends Controller
                         : null
                 );
 
+                EventRecorder::record(
+                    Event::of('payment.succeeded', array('session_status' => $checkout_status, 'order_status' => (string)$order_status_id, 'order_updated' => true))->about(
+                        array('payment_id' => (string)$payment_id, 'order_ref' => (string)$order_id)
+                    )
+                );
+                EventRecorder::record(
+                    Event::of('order.marked_paid', array('source' => 'return_hosted', 'target_status' => (string)$order_status_id))->about(
+                        array('payment_id' => (string)$payment_id, 'order_ref' => (string)$order_id)
+                    )
+                );
+
                 // Redirect to success page
                 $this->response->redirect($this->url->link('checkout/success', '', true));
             } elseif ($checkout_status === 'expired') {
                 $this->logError('Checkout expired: ' . $checkout_id);
+
+                // An expired session is unambiguously a failure.
+                EventRecorder::record(
+                    Event::failure('payment.failed', 'expired', array('session_status' => $checkout_status, 'order_status' => (string)$order_info['order_status_id']))->about(
+                        array('payment_id' => (string)$checkout_id, 'order_ref' => (string)$order_id)
+                    )
+                );
+
                 $this->response->redirect($this->url->link('extension/payment/paypercut/failure', '', true));
             } elseif ($checkout_status === 'open') {
                 // Checkout is still open - payment not completed
                 $this->logError('Checkout still open (payment not completed): ' . $checkout_id);
+
+                // Still open is not a decline: the shopper may simply have come
+                // back before finishing, so it gets its own name.
+                EventRecorder::record(
+                    Event::failure('payment.closed_unpaid', 'open', array('session_status' => $checkout_status, 'order_status' => (string)$order_info['order_status_id']))->about(
+                        array('payment_id' => (string)$checkout_id, 'order_ref' => (string)$order_id)
+                    )
+                );
+
                 $this->response->redirect($this->url->link('extension/payment/paypercut/failure', '', true));
             } else {
+                EventRecorder::record(
+                    Event::failure('order.status_unhandled', 'unknown_payment_status', array('source' => 'return_hosted', 'payment_status' => (string)$checkout_status))->about(
+                        array('payment_id' => (string)$checkout_id, 'order_ref' => (string)$order_id)
+                    )
+                );
+
                 throw new Exception('Unknown checkout status: ' . $checkout_status);
             }
         } catch (Exception $e) {
             $this->logError('Hosted checkout callback error: ' . $e->getMessage());
+
+            EventRecorder::record(Event::failure('checkout.return.unverifiable', 'lookup_failed', array(), $e));
+
             $this->response->redirect($this->url->link('extension/payment/paypercut/failure', '', true));
         }
     }
@@ -695,9 +927,22 @@ class ControllerExtensionPaymentPaypercut extends Controller
                     : null
             );
 
+            EventRecorder::record(
+                Event::of(
+                    'checkout.embedded.order_created',
+                    array(
+                        'order_status' => (string)$order_status_id,
+                        'session_matched' => true,
+                        'verified_status' => (string)$checkout_data['status']
+                    )
+                )->about(array('payment_id' => (string)$payment_id, 'order_ref' => (string)$order_id))
+            );
+
             // Redirect to success page
             $this->response->redirect($this->url->link('checkout/success', '', true));
         } catch (Exception $e) {
+            EventRecorder::record(Event::failure('checkout.return.unverifiable', 'lookup_failed', array(), $e));
+
             // Log error
             $log = new Log('paypercut_error.log');
             $log->write('Embedded checkout callback error: ' . $e->getMessage());
@@ -709,6 +954,8 @@ class ControllerExtensionPaymentPaypercut extends Controller
             echo '<pre>' . htmlspecialchars($e->getTraceAsString()) . '</pre>';
             exit;
         } catch (Error $e) {
+            EventRecorder::record(Event::failure('checkout.return.unverifiable', 'lookup_failed', array(), $e));
+
             // Catch PHP 7+ errors
             $log = new Log('paypercut_error.log');
             $log->write('Embedded checkout callback fatal error: ' . $e->getMessage());
@@ -809,10 +1056,15 @@ class ControllerExtensionPaymentPaypercut extends Controller
         $payload = file_get_contents('php://input');
         $signature = isset($_SERVER['HTTP_X_PAYPERCUT_SIGNATURE']) ? $_SERVER['HTTP_X_PAYPERCUT_SIGNATURE'] : '';
 
+        if ($payload === '' || $payload === false) {
+            $this->reject('empty_body', 400);
+            return;
+        }
+
         // Verify webhook signature
         if (!$this->verifyWebhookSignature($payload, $signature)) {
             $this->log('Webhook signature verification failed');
-            http_response_code(401);
+            $this->reject($signature === '' ? 'missing_signature' : 'invalid_signature', 401);
             return;
         }
 
@@ -820,12 +1072,25 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
         if (!$data) {
             $this->log('Invalid webhook payload');
+
+            EventRecorder::record(
+                Event::failure('webhook.payload_invalid', 'empty_or_unparsable', array('http_status' => 400))
+            );
+
             http_response_code(400);
             return;
         }
 
         // Log webhook event
         $this->log('Webhook received: ' . ($data['type'] ?? 'unknown'));
+
+        $duplicate = $this->isWebhookLogged($data['id'] ?? '');
+
+        EventRecorder::record(
+            $duplicate
+                ? Event::of('webhook.received', array('duplicate' => true))
+                : Event::of('webhook.received', array('duplicate' => false, 'type' => (string)($data['type'] ?? 'unknown')))
+        );
 
         // Store webhook event in database if logging is enabled
         if ($this->config->get('payment_paypercut_logging')) {
@@ -843,12 +1108,46 @@ class ControllerExtensionPaymentPaypercut extends Controller
                     break;
                 default:
                     $this->log('Unhandled webhook event type: ' . $data['type']);
+
+                    EventRecorder::record(
+                        Event::of('webhook.skipped', array('webhook' => (string)$data['type'], 'reason' => 'unhandled_type'))
+                    );
+
                     http_response_code(501);
                     return;
             }
         }
 
         http_response_code(200);
+    }
+
+    /**
+     * Refuse a delivery, and say why in one place.
+     */
+    private function reject($code, $http_status)
+    {
+        EventRecorder::record(Event::failure('webhook.rejected', $code, array('http_status' => (int)$http_status)));
+
+        http_response_code((int)$http_status);
+    }
+
+    /**
+     * Has this delivery been seen before? Read-only, so the received event can
+     * report a duplicate before the log row is written.
+     */
+    private function isWebhookLogged($event_id)
+    {
+        if (empty($event_id)) {
+            return false;
+        }
+
+        $query = $this->db->query("
+            SELECT log_id FROM `" . DB_PREFIX . "paypercut_webhook_log`
+            WHERE event_id = '" . $this->db->escape($event_id) . "'
+            LIMIT 1
+        ");
+
+        return $query->num_rows > 0;
     }
 
     private function verifyWebhookSignature($payload, $signature)
@@ -858,6 +1157,11 @@ class ControllerExtensionPaymentPaypercut extends Controller
         if (empty($webhook_secret)) {
             // If no secret configured, skip verification (not recommended for production)
             $this->log('Warning: Webhook secret not configured, skipping signature verification');
+
+            EventRecorder::record(
+                Event::of('webhook.skipped', array('webhook' => 'signature', 'reason' => 'webhook_secret_not_configured'))
+            );
+
             return true;
         }
 
@@ -878,6 +1182,15 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
         if (!$checkout_id) {
             $this->log('Payment intent event missing checkout_id');
+
+            EventRecorder::record(
+                Event::failure('webhook.unresolved', 'order_not_found', array(
+                    'http_status' => 200,
+                    'has_client_reference_id' => false,
+                    'has_metadata' => isset($intent['metadata'])
+                ))->about(array('payment_id' => (string)($intent['id'] ?? '')))
+            );
+
             return;
         }
 
@@ -890,6 +1203,15 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
         if ($query->num_rows === 0) {
             $this->log('No transaction found for checkout_id: ' . $checkout_id);
+
+            EventRecorder::record(
+                Event::failure('webhook.unresolved', 'order_not_found', array(
+                    'http_status' => 200,
+                    'has_client_reference_id' => false,
+                    'has_metadata' => isset($intent['metadata'])
+                ))->about(array('payment_id' => (string)$checkout_id))
+            );
+
             return;
         }
 
@@ -897,6 +1219,13 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
         if ($this->isWebhookProcessed($data['id'] ?? '', $order_id, $data['type'])) {
             $this->log('Webhook already processed for order #' . $order_id);
+
+            EventRecorder::record(
+                Event::of('webhook.skipped', array('webhook' => (string)$data['type'], 'reason' => 'already_processed'))->about(
+                    array('order_ref' => (string)$order_id, 'payment_id' => (string)$checkout_id)
+                )
+            );
+
             return;
         }
 
@@ -911,6 +1240,12 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
             $this->model_checkout_order->addOrderHistory($order_id, $order_status_id, $comment, true);
             $this->log($data['type'] . ' processed for order #' . $order_id);
+
+            EventRecorder::record(
+                Event::of('webhook.order_updated', array('payment_status' => 'succeeded', 'order_status' => (string)$order_status_id))->about(
+                    array('payment_id' => (string)($intent['id'] ?? $checkout_id), 'order_ref' => (string)$order_id)
+                )
+            );
         }
     }
 
@@ -925,11 +1260,27 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
         if (!$order_id) {
             $this->log('checkout_session.completed missing client_reference_id');
+
+            EventRecorder::record(
+                Event::failure('webhook.unresolved', 'order_not_found', array(
+                    'http_status' => 200,
+                    'has_client_reference_id' => false,
+                    'has_metadata' => isset($session['metadata'])
+                ))->about(array('payment_id' => (string)($session['id'] ?? '')))
+            );
+
             return;
         }
 
         if ($this->isWebhookProcessed($data['id'] ?? '', $order_id, 'checkout_session.completed')) {
             $this->log('Webhook already processed for order #' . $order_id);
+
+            EventRecorder::record(
+                Event::of('webhook.skipped', array('webhook' => 'checkout_session.completed', 'reason' => 'already_processed'))->about(
+                    array('order_ref' => (string)$order_id, 'payment_id' => (string)($session['id'] ?? ''))
+                )
+            );
+
             return;
         }
 
@@ -939,6 +1290,17 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
         if ($status !== 'complete' || $payment_status !== 'paid') {
             $this->log('checkout_session.completed skipped: status=' . $status . ' payment_status=' . $payment_status);
+
+            // Complete but unpaid is not a decline: paycore sets exactly that on
+            // an authorisation awaiting manual capture.
+            EventRecorder::record(
+                $status === 'expired'
+                    ? Event::failure('payment.failed', 'expired', array('payment_status' => (string)$payment_status, 'session_status' => (string)$status))
+                        ->about(array('order_ref' => (string)$order_id, 'payment_id' => (string)($session['id'] ?? '')))
+                    : Event::failure('payment.closed_unpaid', Event::identifier((string)$payment_status) ?: 'unknown', array('payment_status' => (string)$payment_status, 'session_status' => (string)$status))
+                        ->about(array('order_ref' => (string)$order_id, 'payment_id' => (string)($session['id'] ?? '')))
+            );
+
             return;
         }
 
@@ -953,6 +1315,25 @@ class ControllerExtensionPaymentPaypercut extends Controller
 
             $this->model_checkout_order->addOrderHistory($order_id, $order_status_id, $comment, true);
             $this->log('checkout_session.completed processed for order #' . $order_id);
+
+            EventRecorder::record(
+                Event::of('webhook.order_updated', array('payment_status' => (string)$payment_status, 'order_status' => (string)$order_status_id))->about(
+                    array('payment_id' => (string)($session['id'] ?? ''), 'order_ref' => (string)$order_id)
+                )
+            );
+            EventRecorder::record(
+                Event::of('order.marked_paid', array('source' => 'webhook', 'target_status' => (string)$order_status_id))->about(
+                    array('payment_id' => (string)($session['id'] ?? ''), 'order_ref' => (string)$order_id)
+                )
+            );
+        } else {
+            EventRecorder::record(
+                Event::failure('webhook.unresolved', 'order_not_found', array(
+                    'http_status' => 200,
+                    'has_client_reference_id' => true,
+                    'has_metadata' => isset($session['metadata'])
+                ))->about(array('order_ref' => (string)$order_id, 'payment_id' => (string)($session['id'] ?? '')))
+            );
         }
     }
 
@@ -1162,7 +1543,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
     private function sendPaymentRequest($data)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/checkouts';
+        $api_url = $this->apiUrl('v1/checkouts');
 
         if (!$api_key) {
             return array('error' => $this->language->get('error_api_key_missing'));
@@ -1277,10 +1658,13 @@ class ControllerExtensionPaymentPaypercut extends Controller
             curl_setopt($ch, CURLOPT_TIMEOUT, 30); // 30 seconds timeout
             curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10); // 10 seconds connection timeout
 
+            $started = microtime(true);
             $response = curl_exec($ch);
             $curl_error = curl_error($ch);
             $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
+
+            $this->reportApiResult('checkout_session_create', $curl_error ? 0 : $http_code, $response, (int)round((microtime(true) - $started) * 1000));
 
             // Handle cURL errors
             if ($curl_error) {
@@ -1348,7 +1732,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
 
-        $api_url = 'https://api.paypercut.io/v1/payments/' . $payment_id;
+        $api_url = $this->apiUrl('v1/payments/' . $payment_id);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -1358,14 +1742,23 @@ class ControllerExtensionPaymentPaypercut extends Controller
             'Content-Type: application/json'
         ));
 
+        $started = microtime(true);
         $response = curl_exec($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+
+        $this->reportApiResult('payment_lookup', $http_code, $response, (int)round((microtime(true) - $started) * 1000), 'GET');
 
         if ($http_code == 200) {
             $result = json_decode($response, true);
             return $result; // Return full payment data
         }
+
+        EventRecorder::record(
+            Event::failure('checkout.session_unverifiable', 'lookup_failed', array('http_status' => (int)$http_code))->about(
+                array('payment_id' => (string)$payment_id)
+            )
+        );
 
         return null;
     }
@@ -1374,7 +1767,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
 
-        $api_url = 'https://api.paypercut.io/v1/checkouts/' . $checkout_id;
+        $api_url = $this->apiUrl('v1/checkouts/' . $checkout_id);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -1386,22 +1779,47 @@ class ControllerExtensionPaymentPaypercut extends Controller
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
 
+        $started = microtime(true);
         $response = curl_exec($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curl_error = curl_error($ch);
         curl_close($ch);
 
+        $this->reportApiResult('checkout_session_lookup', $curl_error ? 0 : $http_code, $response, (int)round((microtime(true) - $started) * 1000), 'GET');
+
         if ($curl_error) {
             $this->logError('Checkout verification cURL Error: ' . $curl_error);
+
+            EventRecorder::record(
+                Event::failure('checkout.session_unverifiable', 'lookup_failed')->about(array('payment_id' => (string)$checkout_id))
+            );
+
             return null;
         }
 
         if ($http_code == 200) {
             $result = json_decode($response, true);
+
+            if (!is_array($result)) {
+                // The body is never reported, only its size.
+                EventRecorder::record(
+                    Event::failure('api.response_unparsable', 'decode_failed', array('body_bytes' => strlen((string)$response)))
+                );
+
+                return null;
+            }
+
             return $result; // Return full checkout data
         }
 
         $this->logError('Checkout verification failed (HTTP ' . $http_code . '): ' . $response);
+
+        EventRecorder::record(
+            Event::failure('checkout.session_unverifiable', 'lookup_failed', array('http_status' => (int)$http_code))->about(
+                array('payment_id' => (string)$checkout_id)
+            )
+        );
+
         return null;
     }
 
@@ -1516,7 +1934,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
         }
 
         // Create new Paypercut customer
-        $api_url = 'https://api.paypercut.io/v1/customers';
+        $api_url = $this->apiUrl('v1/customers');
 
         $payload = array(
             'email' => $customer_data['email'],
@@ -1609,7 +2027,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
     private function updatePaypercutCustomer($paypercut_id, $customer_data)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/customers/' . $paypercut_id;
+        $api_url = $this->apiUrl('v1/customers/' . $paypercut_id);
 
         $payload = array(
             'email' => $customer_data['email'],
@@ -1652,7 +2070,7 @@ class ControllerExtensionPaymentPaypercut extends Controller
     private function verifyPaypercutCustomerExists($paypercut_id)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/customers/' . $paypercut_id;
+        $api_url = $this->apiUrl('v1/customers/' . $paypercut_id);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);

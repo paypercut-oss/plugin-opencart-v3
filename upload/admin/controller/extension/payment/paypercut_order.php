@@ -1,11 +1,32 @@
 <?php
 
+use Paypercut\Support\Environment;
+use Paypercut\Telemetry\Bootstrap;
+use Paypercut\Telemetry\Event;
+use Paypercut\Telemetry\EventRecorder;
+
 /**
  * Paypercut Order Management Controller
  * Handles refunds and displays payment information in order view
  */
 class ControllerExtensionPaymentPaypercutOrder extends Controller
 {
+    public function __construct($registry)
+    {
+        parent::__construct($registry);
+
+        require_once DIR_SYSTEM . 'library/paypercut/bootstrap.php';
+
+        Bootstrap::boot($registry);
+    }
+
+    /**
+     * Resolve a Paypercut API endpoint for the store's chosen environment.
+     */
+    private function apiUrl($path)
+    {
+        return Environment::apiBaseUri((string)$this->config->get('payment_paypercut_environment')) . $path;
+    }
 
     /**
      * Display Paypercut payment details in order view
@@ -45,8 +66,11 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
                 $tab_data['total_refunded'] = $this->getTotalRefunded($order_id);
                 $tab_data['can_refund'] = ($transaction['status'] === 'succeeded' && $tab_data['total_refunded'] < $transaction['amount']);
 
-                // Paypercut Dashboard link
-                $tab_data['paypercut_dashboard_url'] = 'https://dashboard.paypercut.io/payments/' . $transaction['payment_id'];
+                // Paypercut Dashboard link, for the environment this store is
+                // connected to: a dev/stage payment has no production record.
+                $tab_data['paypercut_dashboard_url'] = Environment::dashboardBaseUri(
+                    (string)$this->config->get('payment_paypercut_environment')
+                ) . 'payments/' . $transaction['payment_id'];
             } else {
                 $tab_data['has_transaction'] = false;
                 $tab_data['refunds'] = array();
@@ -117,6 +141,10 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
 
                 if (!$transaction) {
                     $json['error'] = $this->language->get('error_no_transaction');
+
+                    EventRecorder::record(
+                        Event::failure('refund.rejected', 'missing_payment_intent')->about(array('order_ref' => (string)$order_id))
+                    );
                 } elseif ($transaction['status'] !== 'succeeded') {
                     $json['error'] = $this->language->get('error_payment_not_succeeded');
                 } else {
@@ -133,8 +161,16 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
                             // Partial refund - validate the amount
                             if ($refund_amount <= 0) {
                                 $json['error'] = $this->language->get('error_invalid_amount');
+
+                                EventRecorder::record(
+                                    Event::failure('refund.rejected', 'invalid_amount')->about(array('order_ref' => (string)$order_id))
+                                );
                             } elseif (($total_refunded + $refund_amount) > $transaction['amount']) {
                                 $json['error'] = $this->language->get('error_exceeds_payment');
+
+                                EventRecorder::record(
+                                    Event::failure('refund.rejected', 'invalid_amount')->about(array('order_ref' => (string)$order_id))
+                                );
                             }
                             $this->logError('Partial refund validated: ' . $refund_amount);
                         }
@@ -186,6 +222,25 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
                             date_added = NOW()
                     ");
 
+                    EventRecorder::record(
+                        Event::of(
+                            'refund.succeeded',
+                            array(
+                                'is_partial' => !$is_full_refund,
+                                // The reason text is merchant-authored free
+                                // text; only whether one was given travels.
+                                'has_reason' => $refund_reason_text !== '',
+                                'has_refund_id' => !empty($result['refund_id'])
+                            )
+                        )->about(
+                            array(
+                                'order_ref' => (string)$order_id,
+                                'payment_intent_id' => (string)$transaction['payment_intent'],
+                                'payment_id' => (string)$transaction['payment_id']
+                            )
+                        )
+                    );
+
                     $json['success'] = $this->language->get('text_refund_success');
                     $json['refund_id'] = $result['refund_id'];
                     $json['amount'] = number_format($refund_amount, 2);
@@ -193,6 +248,12 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
             } catch (Exception $e) {
                 $json['error'] = $e->getMessage();
                 $this->logError('Refund error: ' . $e->getMessage());
+
+                EventRecorder::record(
+                    Event::failure('refund.failed', 'transport', array('has_reason' => $refund_reason_text !== ''), $e)->about(
+                        array('order_ref' => (string)$order_id)
+                    )
+                );
             }
         }
 
@@ -258,7 +319,7 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
     private function processRefund($payment_id, $payment_intent, $amount, $currency, $reason = '')
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/refunds';
+        $api_url = $this->apiUrl('v1/refunds');
 
         if (!$api_key) {
             return array('error' => $this->language->get('error_api_key_missing'));
@@ -297,11 +358,21 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
 
         if ($curl_error) {
             $this->logError('Refund cURL Error: ' . $curl_error);
+
+            EventRecorder::record(
+                Event::failure('refund.failed', 'transport')->about(array('payment_id' => (string)$payment_id))
+            );
+
             return array('error' => $this->language->get('error_connection'));
         }
 
         if ($http_code == 0) {
             $this->logError('Refund API Timeout');
+
+            EventRecorder::record(
+                Event::failure('refund.failed', 'transport')->about(array('payment_id' => (string)$payment_id))
+            );
+
             return array('error' => $this->language->get('error_timeout'));
         }
 
@@ -326,6 +397,14 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
         }
 
         $this->logError('Refund API Error (HTTP ' . $http_code . '): ' . $response);
+
+        // The API quotes submitted input back, so its prose never travels —
+        // api_code and trace_id carry the diagnosis instead.
+        EventRecorder::record(
+            Event::apiFailure('refund.failed', $http_code, is_array($result) ? $result : array())->about(
+                array('payment_id' => (string)$payment_id, 'payment_intent_id' => (string)$payment_intent)
+            )
+        );
 
         return array('error' => $error_message);
     }
@@ -426,7 +505,7 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
                 $api_key = $this->config->get('payment_paypercut_api_key');
                 $payment_id = $transaction['payment_id'];
 
-                $api_url = 'https://api.paypercut.io/v1/payments/' . $payment_id;
+                $api_url = $this->apiUrl('v1/payments/' . $payment_id);
 
                 $ch = curl_init();
                 curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -518,7 +597,7 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
                 $api_key = $this->config->get('payment_paypercut_api_key');
                 $payment_id = $transaction['payment_id'];
 
-                $api_url = 'https://api.paypercut.io/v1/payments/' . $payment_id . '/capture';
+                $api_url = $this->apiUrl('v1/payments/' . $payment_id . '/capture');
 
                 $payload = array();
                 if ($capture_amount > 0 && $capture_amount < $transaction['amount']) {
@@ -569,11 +648,23 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
                             date_added = NOW()
                     ");
 
+                    EventRecorder::record(
+                        Event::of('payment.captured', array('source' => 'admin'))->about(
+                            array('order_ref' => (string)$order_id, 'payment_id' => (string)$payment_id)
+                        )
+                    );
+
                     $json['success'] = 'Payment captured successfully';
                     $json['payment_id'] = $payment_id;
                 } else {
                     $error_data = json_decode($response, true);
                     $json['error'] = isset($error_data['message']) ? $error_data['message'] : 'Failed to capture payment';
+
+                    EventRecorder::record(
+                        Event::apiFailure('payment.capture_failed', $http_code, is_array($error_data) ? $error_data : array(), array('source' => 'admin'))->about(
+                            array('order_ref' => (string)$order_id, 'payment_id' => (string)$payment_id)
+                        )
+                    );
                 }
             } catch (Exception $e) {
                 $json['error'] = $e->getMessage();
@@ -622,7 +713,7 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
                 $api_key = $this->config->get('payment_paypercut_api_key');
                 $payment_id = $transaction['payment_id'];
 
-                $api_url = 'https://api.paypercut.io/v1/payments/' . $payment_id . '/cancel';
+                $api_url = $this->apiUrl('v1/payments/' . $payment_id . '/cancel');
 
                 $payload = array();
                 if ($cancel_reason) {
@@ -676,11 +767,23 @@ class ControllerExtensionPaymentPaypercutOrder extends Controller
                             date_added = NOW()
                     ");
 
+                    EventRecorder::record(
+                        Event::of('payment.canceled', array('source' => 'admin'))->about(
+                            array('order_ref' => (string)$order_id, 'payment_id' => (string)$payment_id)
+                        )
+                    );
+
                     $json['success'] = 'Payment canceled successfully';
                     $json['payment_id'] = $payment_id;
                 } else {
                     $error_data = json_decode($response, true);
                     $json['error'] = isset($error_data['message']) ? $error_data['message'] : 'Failed to cancel payment';
+
+                    EventRecorder::record(
+                        Event::apiFailure('payment.cancel_failed', $http_code, is_array($error_data) ? $error_data : array(), array('source' => 'admin'))->about(
+                            array('order_ref' => (string)$order_id, 'payment_id' => (string)$payment_id)
+                        )
+                    );
                 }
             } catch (Exception $e) {
                 $json['error'] = $e->getMessage();
