@@ -219,6 +219,26 @@ class ControllerExtensionPaymentPaypercutTelemetry extends Controller
      * is gated on a merchant preference, so without this a session could run
      * with no visible trace for anyone but the person who started it.
      */
+    /**
+     * Deliver at most one batch, from wherever in the admin the merchant is.
+     *
+     * Bounded to one batch on purpose: this runs on every admin page render,
+     * and the panel's own poll drains the rest.
+     */
+    private function deliverQueued()
+    {
+        Bootstrap::loadAdmin();
+
+        TelemetrySession::reap();
+
+        if (!TelemetrySession::isActiveFast() || EventQueue::size() === 0) {
+            return;
+        }
+
+        $flusher = new Flusher();
+        $flusher->flushOnce();
+    }
+
     public function notice(&$route, &$data, &$output)
     {
         if (!$this->user->hasPermission('access', 'extension/payment/paypercut')) {
@@ -234,6 +254,14 @@ class ControllerExtensionPaymentPaypercutTelemetry extends Controller
         if ((int)(isset($record['expires_at']) ? $record['expires_at'] : 0) <= time()) {
             return;
         }
+
+        // This event renders on every admin page, which is the only place a
+        // merchant reliably returns to after reproducing a problem on the
+        // storefront. Without it the events from the reproduction wait for the
+        // merchant to find their way back to the Paypercut screen, and expire
+        // with the session if they never do. Never from a storefront request:
+        // a shopper must not wait on an outbound call to Paypercut.
+        $this->deliverQueued();
 
         $this->load->language('extension/payment/paypercut_telemetry');
 
