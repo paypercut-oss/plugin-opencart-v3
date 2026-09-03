@@ -7,10 +7,19 @@ namespace Paypercut\Telemetry;
  *
  * Codes and versions only. OpenCart records no version for an extension, so a
  * version appears only where an OCMod modification of the same code carries
- * one; everything else reports an empty version rather than a guess.
+ * one; everything else reports UNKNOWN_VERSION rather than a guess.
+ *
+ * Never an empty string: the edge discards an attribute whose value is empty,
+ * and it discards the key with it, so an unversioned extension used to arrive
+ * as no extension at all — which is the one thing this event exists to name.
  */
 class ActiveExtensions
 {
+    /**
+     * Stands in for a version OpenCart never recorded.
+     */
+    const UNKNOWN_VERSION = 'unknown';
+
     /**
      * @return array code => version, sorted by code.
      */
@@ -31,7 +40,8 @@ class ActiveExtensions
                 $code = Event::text((string)$row['code']);
 
                 if ($code !== '') {
-                    $extensions[$code] = Event::text((string)$row['version']);
+                    $version = Event::text((string)$row['version']);
+                    $extensions[$code] = $version === '' ? self::UNKNOWN_VERSION : $version;
                 }
             }
 
@@ -41,7 +51,7 @@ class ActiveExtensions
                 $code = Event::text((string)$row['type'] . '.' . (string)$row['code']);
 
                 if ($code !== '' && !isset($extensions[$code])) {
-                    $extensions[$code] = '';
+                    $extensions[$code] = self::UNKNOWN_VERSION;
                 }
             }
         } catch (\Exception $exception) {

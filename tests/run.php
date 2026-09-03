@@ -20,8 +20,10 @@ require_once $root . '/upload/system/library/paypercut/telemetry/eventqueue.php'
 require_once $root . '/upload/system/library/paypercut/telemetry/sentlog.php';
 require_once $root . '/upload/system/library/paypercut/telemetry/edgeclient.php';
 require_once $root . '/upload/system/library/paypercut/telemetry/flusher.php';
+require_once $root . '/upload/system/library/paypercut/telemetry/activeextensions.php';
 
 use Paypercut\Support\Environment;
+use Paypercut\Telemetry\ActiveExtensions;
 use Paypercut\Telemetry\Event;
 use Paypercut\Telemetry\EventQueue;
 use Paypercut\Telemetry\Flusher;
@@ -346,6 +348,28 @@ foreach ($key_poisons as $label => $poison) {
 }
 
 check('the key walk actually reached something', $key_cases > 20);
+
+// An extension with no recorded version must still name itself: the edge drops
+// an attribute whose value is empty, and it drops the key with it, so an
+// unversioned extension used to arrive as no extension at all.
+check('the unknown-version placeholder is not empty', ActiveExtensions::UNKNOWN_VERSION !== '');
+
+$unversioned = Event::environmentPlugins(array(
+    'payment.somegateway' => ActiveExtensions::UNKNOWN_VERSION,
+    'ocmod.somemod' => '1.2.3',
+));
+
+$unversioned_attrs = $unversioned[0]->envelope(0);
+$unversioned_attrs = isset($unversioned_attrs['attrs']) ? $unversioned_attrs['attrs'] : array();
+
+check(
+    'an unversioned extension keeps its code',
+    isset($unversioned_attrs['payment.somegateway']) && $unversioned_attrs['payment.somegateway'] !== ''
+);
+check(
+    'a versioned extension keeps its version',
+    isset($unversioned_attrs['ocmod.somemod']) && $unversioned_attrs['ocmod.somemod'] === '1.2.3'
+);
 
 // environmentPlugins() is the one producer whose attribute names come from the
 // store rather than from a literal, so it is where a poisoned key would land.
