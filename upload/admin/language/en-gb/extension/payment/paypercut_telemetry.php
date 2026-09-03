@@ -50,6 +50,7 @@ $_['button_telemetry_stop'] = 'Stop now';
 $_['button_telemetry_confirm'] = 'Start session';
 $_['button_telemetry_cancel'] = 'Cancel';
 $_['button_telemetry_copy'] = 'Copy';
+$_['button_telemetry_copy_json'] = 'Copy JSON';
 
 // Error
 $_['error_telemetry_permission'] = 'Insufficient permissions.';

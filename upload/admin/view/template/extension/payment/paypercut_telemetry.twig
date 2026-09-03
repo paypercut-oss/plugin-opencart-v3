@@ -90,7 +90,8 @@
     </div>
     <details>
       <summary>{{ text_telemetry_log_raw }}</summary>
-      <pre style="max-height: 320px; overflow: auto;">{{ log_raw|escape }}</pre>
+      <p><button type="button" class="btn btn-link btn-xs" data-paypercut-copy data-paypercut-copy-target="#paypercut-debug-log-raw">{{ button_telemetry_copy_json }}</button></p>
+      <pre id="paypercut-debug-log-raw" style="max-height: 320px; overflow: auto;">{{ log_raw|escape }}</pre>
     </details>
   </details>
   {% endif %}
@@ -369,10 +370,14 @@
         }
     }
 
-    function copySessionId(button) {
-        // Two rows offer a Copy button — the session id and the support
-        // reference — so copy the code beside this one, not the first on screen.
-        var node = $(button).closest('p').find('code').get(0) || $(panel).find('[data-paypercut-session-id]').get(0);
+    function copyValue(button) {
+        // Several controls offer a Copy button — the session id, the support
+        // reference, the raw log — so copy what this one points at, not the
+        // first code element on screen.
+        var target = button.getAttribute('data-paypercut-copy-target');
+        var node = target
+            ? $(panel).find(target).get(0)
+            : $(button).closest('p').find('code').get(0) || $(panel).find('[data-paypercut-session-id]').get(0);
         var value = node ? node.textContent : '';
 
         if (!value) {
@@ -428,7 +433,7 @@
 
     $(panel).on('click', '[data-paypercut-copy]', function (event) {
         event.preventDefault();
-        copySessionId(this);
+        copyValue(this);
     });
 
     $('#paypercut-debug-session-modal').on('click', '.paypercut-debug-session-confirm', function (event) {
