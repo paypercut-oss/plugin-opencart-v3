@@ -10,6 +10,7 @@ $_['text_paypercut'] = '<img src="view/image/payment/paypercut.png" alt="Payperc
 
 // Entry
 $_['entry_api_key'] = 'API Key';
+$_['entry_environment'] = 'Environment';
 $_['entry_operating_account'] = 'Operating Account ID';
 $_['entry_statement_descriptor'] = 'Statement Descriptor';
 $_['entry_google_pay'] = 'Google Pay';
@@ -25,6 +26,7 @@ $_['entry_applepay_domain_file'] = 'Apple Pay Domain File';
 
 // Help
 $_['help_api_key'] = 'Enter your Paypercut API Key from the dashboard';
+$_['help_environment'] = 'Which Paypercut environment this store talks to. Leave on Production unless Paypercut asked you to change it.';
 $_['help_operating_account'] = 'Enter your Operating Account ID (found in Paypercut Dashboard)';
 $_['help_statement_descriptor'] = 'Text that appears on customer\'s bank statement (max 22 characters). Leave empty to use default.';
 $_['help_google_pay'] = 'Enable Google Pay as a payment option';
@@ -42,6 +44,10 @@ $_['error_statement_descriptor'] = 'Statement descriptor must be 22 characters o
 $_['error_unsupported_currency'] = 'Warning: Your store currency (%s) is not supported by Paypercut. Supported currencies: BGN, DKK, SEK, NOK, GBP, EUR, USD, CHF, CZK, HUF, PLN, RON';
 
 // Text
+$_['text_environment_production'] = 'Production';
+$_['text_environment_stage'] = 'Stage';
+$_['text_environment_dev'] = 'Development';
+$_['text_telemetry_tab'] = 'Debug Session';
 $_['text_mode_test'] = 'Test Mode';
 $_['text_mode_live'] = 'Live Mode';
 $_['text_mode_unknown'] = 'Unknown Mode';
