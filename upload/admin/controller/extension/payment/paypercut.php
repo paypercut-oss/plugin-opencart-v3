@@ -1149,6 +1149,17 @@ class ControllerExtensionPaymentPaypercut extends Controller
             'extension/payment/paypercut_telemetry/notice'
         );
 
+        // Grant the current admin's group access to the plugin's custom admin
+        // routes, else refund/capture/cancel and the logs viewer hit "Permission Denied".
+        // (paypercut_telemetry is reached only via load->controller(), so no grant needed.)
+        $this->load->model('user/user_group');
+        $group_id = $this->user->getGroupId();
+        foreach (array('extension/payment/paypercut_order', 'extension/payment/paypercut_logs') as $route) {
+            foreach (array('access', 'modify') as $type) {
+                $this->model_user_user_group->addPermission($group_id, $type, $route);
+            }
+        }
+
         // Deploy the Apple Pay domain verification file to <webroot>/.well-known/.
         // Non-blocking: install must succeed even if the webroot is not writable.
         $applepay_deploy = $this->deployApplePayDomainAssociation();
@@ -1175,6 +1186,14 @@ class ControllerExtensionPaymentPaypercut extends Controller
         $this->load->model('setting/event');
         $this->model_setting_event->deleteEventByCode('paypercut_order_info');
         $this->model_setting_event->deleteEventByCode('paypercut_telemetry_notice');
+
+        $this->load->model('user/user_group');
+        $group_id = $this->user->getGroupId();
+        foreach (array('extension/payment/paypercut_order', 'extension/payment/paypercut_logs') as $route) {
+            foreach (array('access', 'modify') as $type) {
+                $this->model_user_user_group->removePermission($group_id, $type, $route);
+            }
+        }
 
         // Note: We intentionally don't drop database tables to preserve transaction history
         // If you want to completely remove all data, manually drop these tables:

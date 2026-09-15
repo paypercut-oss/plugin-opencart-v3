@@ -24,3 +24,6 @@ vqmod/mods.cache
 
 .vscode/
 .stubs/
+
+# build output — ocmod zip is a GitHub Release asset, not committed
+/dist/

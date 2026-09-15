@@ -2,7 +2,7 @@
 <extension>
     <name>Paypercut Payments</name>
     <code>paypercut</code>
-    <version>1.1.0</version>
+    <version>1.1.1</version>
     <author>Paypercut</author>
     <link>https://paypercut.io</link>
     <file path="upload" />
